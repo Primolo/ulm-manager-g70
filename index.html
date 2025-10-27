@@ -3,808 +3,1017 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ULM Manager - Gestion Aéronautique</title>
-    <!-- Chargement de Tailwind CSS -->
+    <title>ULM Manager - Gestion de Co-Propriété</title>
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Configuration de la police Inter */
-        html { font-family: 'Inter', sans-serif; }
-        /* Style général du corps */
-        body { background-color: #f7f9fc; }
-        /* Masquer le menu sur les petits écrans par défaut */
-        #nav-menu {
-            transition: transform 0.3s ease-in-out;
-        }
-        @media (max-width: 767px) {
-            #nav-menu.hidden-mobile {
-                transform: translateX(-100%);
-            }
-            #nav-menu.show-mobile {
-                transform: translateX(0);
-                z-index: 50;
-            }
-        }
-    </style>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'primary-blue': '#1e3a8a', /* Dark Blue */
-                        'secondary-yellow': '#facc15', /* Amber */
-                        'bg-light': '#f7f9fc',
-                        'card-bg': '#ffffff',
-                    }
-                }
-            }
-        }
-    </script>
-</head>
-<body class="min-h-screen flex flex-col">
-
-    <!-- Chargement des modules Firebase -->
+    <!-- Firebase CDNs (utilisés par le code JS) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global state and utility functions
-        window.app = null;
-        window.db = null;
-        window.auth = null;
-        window.userId = null;
-        window.currentView = 'dashboard';
+        window.firebase = {
+            initializeApp,
+            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut,
+            getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, arrayUnion
+        };
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .main-content {
+            min-height: calc(100vh - 4rem); /* Hauteur moins la barre de navigation */
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-size: 1.25rem;
+            color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="antialiased">
 
-        // Data holders
-        window.flights = [];
-        window.reservations = [];
-        window.accounts = { totalHours: 0, fuelBalance: 0, cashBalance: 0 };
-        window.ulmList = []; // Liste des ULM disponibles
+    <!-- Overlay de Chargement (Visible par défaut) -->
+    <div id="loading-overlay" class="loading-overlay">
+        <svg class="animate-spin -ml-1 mr-3 h-10 w-10 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p id="loading-message" class="mt-4 text-gray-700">Chargement... Authentification en cours...</p>
+    </div>
 
-        // Helper: Formatage de l'argent
-        window.formatCurrency = (amount) => {
+    <!-- Conteneur Principal de l'Application (Masqué jusqu'à l'authentification) -->
+    <div id="app-container" class="hidden">
+        <!-- Barre de Navigation -->
+        <nav class="bg-white shadow-lg fixed top-0 w-full z-10">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex">
+                        <div class="flex-shrink-0 flex items-center">
+                            <h1 class="text-2xl font-bold text-indigo-600">ULM Manager</h1>
+                        </div>
+                        <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                            <!-- Liens de Navigation -->
+                            <button data-view="dashboard" class="nav-link border-b-2 border-indigo-500 text-indigo-600 px-3 py-2 text-sm font-medium">Tableau de Bord</button>
+                            <button data-view="reservation" class="nav-link border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 px-3 py-2 text-sm font-medium">Réservations</button>
+                            <button data-view="log_flight" class="nav-link border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 px-3 py-2 text-sm font-medium">Loguer Vol</button>
+                            <button data-view="costs" class="nav-link border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 px-3 py-2 text-sm font-medium">Comptabilité</button>
+                            <button data-view="admin" id="admin-nav-link" class="nav-link border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 px-3 py-2 text-sm font-medium hidden">Admin</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="text-sm font-medium text-gray-600 mr-4 hidden sm:block" id="user-info"></div>
+                        <button id="logout-button" class="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium hover:bg-red-600 transition">Déconnexion</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Contenu de la Page -->
+        <main class="main-content pt-20 pb-8 max-w-7xl mx-auto sm:px-6 lg:px-8">
+            <div id="content-area">
+                <!-- Les vues seront rendues ici -->
+            </div>
+        </main>
+    </div>
+
+    <!-- JavaScript Logique -->
+    <script>
+        // Initialisation des variables globales
+        let db;
+        let auth;
+        let currentView = 'dashboard';
+        let state = {
+            aircraft: { fixed_cost_annual: 0, latest_tach_hour: 0, name: '' },
+            pilots: [],
+            reservations: [],
+            flightLogs: [],
+            expenses: [],
+            expenseCategories: []
+        };
+        
+        let userId = null;
+        let isAdmin = false;
+        const AIRCRAFT_ID = 'G70';
+        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const BASE_COLLECTION_PATH = `artifacts/${APP_ID}/public/data`;
+
+        // --- Styles Tailwind pour les boutons ---
+        const PrimaryButtonStyle = "w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition duration-200 ease-in-out";
+        const SecondaryButtonStyle = "w-full py-2 px-4 bg-white text-indigo-600 border border-indigo-200 font-semibold rounded-xl shadow-md hover:bg-gray-50 transition duration-20-out";
+        const InputStyle = "w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500";
+        const CardStyle = "bg-white p-6 rounded-2xl shadow-xl";
+        const StatCardStyle = "bg-white p-6 rounded-2xl shadow-xl border border-indigo-100";
+
+        // --- UTILITAIRES DE DONNÉES ---
+
+        const formatCurrency = (amount) => {
             return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount);
         };
 
-        // Helper: Formatage des heures
-        window.formatHours = (minutes) => {
-            if (typeof minutes !== 'number' || isNaN(minutes)) return '0h00';
-            const h = Math.floor(minutes / 60);
-            const m = minutes % 60;
-            return `${h}h${m.toString().padStart(2, '0')}`;
+        const calculateCostMetrics = () => {
+            const totalHours = state.flightLogs.reduce((sum, log) => sum + parseFloat(log.duration_hours || 0), 0);
+            const totalFuelCost = state.flightLogs.reduce((sum, log) => sum + parseFloat(log.fuel_cost_total || 0), 0);
+            const totalMaintenanceAndOther = state.expenses.reduce((sum, exp) => sum + parseFloat(exp.cost || 0), 0);
+
+            const fixedCostPerYear = parseFloat(state.aircraft.fixed_cost_annual || 0);
+
+            // Coût Annuel Total = Coût Fixe + (Maintenance + Autres Dépenses)
+            const totalAnnualCost = fixedCostPerYear + totalMaintenanceAndOther;
+
+            // Coût Horaire Réel = Coût Annuel Total / Total Heures Volées (si > 0)
+            const realHourlyCostBase = totalHours > 0 ? (totalAnnualCost / totalHours) : 0;
+            
+            // Coût Horaire Total (incluant carburant par heure volée)
+            const averageFuelCostPerHour = totalHours > 0 ? (totalFuelCost / totalHours) : 0;
+            
+            const realHourlyCostTotal = realHourlyCostBase + averageFuelCostPerHour;
+
+
+            return {
+                totalHours: totalHours.toFixed(2),
+                totalAnnualCost: totalAnnualCost,
+                averageFuelCostPerHour: averageFuelCostPerHour,
+                realHourlyCostBase: realHourlyCostBase,
+                realHourlyCostTotal: realHourlyCostTotal,
+                totalMaintenanceAndOther: totalMaintenanceAndOther,
+                fixedCostPerYear: fixedCostPerYear
+            };
         };
+        
+        // --- LOGIQUE CRUD FIREBASE ---
 
-        // Helper: Conversion 'HhMM' string vers minutes
-        window.hhmmsToMinutes = (hhmms) => {
-            if (!hhmms) return 0;
-            const match = hhmms.match(/^(\d+)h(\d{2})$/);
-            if (match) {
-                const hours = parseInt(match[1], 10);
-                const minutes = parseInt(match[2], 10);
-                return (hours * 60) + minutes;
-            }
-            return 0;
-        };
-
-        // --- FIREBASE INITIALIZATION AND AUTHENTICATION ---
-
-        const initializeFirebase = async () => {
+        // Fonction générique pour sauvegarder ou mettre à jour un document
+        async function upsertDocument(collectionName, data, docId = null) {
+            const firestore = window.firebase.getFirestore(window.app);
+            const collectionRef = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/${collectionName}`);
+            
             try {
-                // IMPORTANT: Use the global variables provided by the canvas environment
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                if (docId) {
+                    const docRef = window.firebase.doc(firestore, `${BASE_COLLECTION_PATH}/${collectionName}/${docId}`);
+                    await window.firebase.setDoc(docRef, data, { merge: true });
+                    console.log(`Document mis à jour dans ${collectionName} avec ID: ${docId}`);
+                    return docId;
+                } else {
+                    const newDocRef = await window.firebase.addDoc(collectionRef, data);
+                    console.log(`Nouveau document ajouté à ${collectionName} avec ID: ${newDocRef.id}`);
+                    return newDocRef.id;
+                }
+            } catch (error) {
+                console.error(`Erreur lors de l'upsert dans ${collectionName}: `, error);
+                alert(`Erreur de sauvegarde: ${error.message}`);
+            }
+        }
 
-                if (Object.keys(firebaseConfig).length === 0) {
-                    console.error("Firebase config is missing. Data persistence will not work.");
-                    // Fallback to in-memory state if config is missing (for local testing)
-                    window.renderApp();
+        // --- LISTENERS FIREBASE (LECTURE EN TEMPS RÉEL) ---
+
+        function setupListeners() {
+            const firestore = window.firebase.getFirestore(window.app);
+            
+            // 1. Écoute des données de l'ULM (Aircraft)
+            const aircraftRef = window.firebase.doc(firestore, `${BASE_COLLECTION_PATH}/aircraft/${AIRCRAFT_ID}`);
+            window.firebase.onSnapshot(aircraftRef, (doc) => {
+                if (doc.exists()) {
+                    state.aircraft = { id: doc.id, ...doc.data() };
+                } else {
+                    console.warn("Document ULM non trouvé. Création des données initiales...");
+                    initializeUlmData(); 
+                }
+                renderApp();
+            }, (error) => console.error("Erreur Aircraft Snapshot:", error));
+
+            // 2. Écoute des Co-propriétaires (Pilots)
+            const pilotQuery = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/co_owners`);
+            window.firebase.onSnapshot(pilotQuery, (snapshot) => {
+                state.pilots = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                isAdmin = state.pilots.find(p => p.id === userId)?.isAdmin || false;
+                renderApp();
+            }, (error) => console.error("Erreur Pilot Snapshot:", error));
+
+            // 3. Écoute des Réservations
+            const reservationQuery = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/reservations`);
+            window.firebase.onSnapshot(reservationQuery, (snapshot) => {
+                state.reservations = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Erreur Reservation Snapshot:", error));
+
+            // 4. Écoute des Logs de Vol
+            const logsQuery = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/flight_logs`);
+            window.firebase.onSnapshot(logsQuery, (snapshot) => {
+                state.flightLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Erreur Logs Snapshot:", error));
+            
+            // 5. Écoute des Dépenses
+            const expensesQuery = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/expenses`);
+            window.firebase.onSnapshot(expensesQuery, (snapshot) => {
+                state.expenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Erreur Expenses Snapshot:", error));
+
+             // 6. Écoute des Catégories de Dépenses
+            const categoriesQuery = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/expense_categories`);
+            window.firebase.onSnapshot(categoriesQuery, (snapshot) => {
+                state.expenseCategories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (state.expenseCategories.length === 0) { initializeExpenseCategories(); }
+                renderApp();
+            }, (error) => console.error("Erreur Categories Snapshot:", error));
+        }
+
+        // --- FONCTIONS D'INITIALISATION DE LA BASE DE DONNÉES ---
+
+        async function initializeUlmData() {
+            const data = {
+                name: 'ULM G70',
+                fixed_cost_annual: 5000,
+                latest_tach_hour: 0.0
+            };
+            // Utilise setDoc pour créer le document s'il n'existe pas
+            await upsertDocument('aircraft', data, AIRCRAFT_ID);
+        }
+
+        async function initializeExpenseCategories() {
+             const categories = [
+                { value: 'maintenance', label: 'Maintenance (Prévue)', isFixed: true },
+                { value: 'insurance', label: 'Assurance Annuelle', isFixed: true },
+                { value: 'fees', label: 'Frais Aérodrome', isFixed: false },
+                { value: 'other', label: 'Autre', isFixed: false }
+            ];
+            const firestore = window.firebase.getFirestore(window.app);
+            const collectionRef = window.firebase.collection(firestore, `${BASE_COLLECTION_PATH}/expense_categories`);
+            
+            // Vérifie si la collection est vide avant d'insérer
+            const snapshot = await window.firebase.getDocs(collectionRef);
+            if (snapshot.empty) {
+                for (const cat of categories) {
+                     await window.firebase.addDoc(collectionRef, cat);
+                }
+            }
+        }
+        
+        // Crée le profil du co-propriétaire (appelé après l'authentification)
+        async function upsertCoOwnerProfile(user) {
+            const pilot = state.pilots.find(p => p.id === user.uid);
+            const data = {
+                email: user.email || 'Anonyme',
+                name: user.email ? user.email.split('@')[0] : `Pilote-${user.uid.substring(0, 4)}`,
+                isAdmin: pilot ? pilot.isAdmin : state.pilots.length === 0, // Premier utilisateur est Admin
+                lastLogin: new Date().toISOString()
+            };
+            await upsertDocument('co_owners', data, user.uid);
+            userId = user.uid;
+            isAdmin = data.isAdmin;
+            document.getElementById('user-info').textContent = `Pilote: ${data.name}`;
+            document.getElementById('admin-nav-link').classList.toggle('hidden', !isAdmin);
+        }
+
+        // --- GESTION DES VUES ---
+
+        function renderApp() {
+            // Met à jour la classe active de navigation
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('border-indigo-500', 'text-indigo-600');
+                link.classList.add('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+                if (link.dataset.view === currentView) {
+                    link.classList.add('border-indigo-500', 'text-indigo-600');
+                    link.classList.remove('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+                }
+            });
+
+            const contentArea = document.getElementById('content-area');
+            contentArea.innerHTML = ''; // Nettoyer
+            
+            switch (currentView) {
+                case 'dashboard':
+                    contentArea.innerHTML = renderDashboard();
+                    break;
+                case 'reservation':
+                    contentArea.innerHTML = renderReservation();
+                    attachReservationListeners();
+                    break;
+                case 'log_flight':
+                    contentArea.innerHTML = renderLogFlight();
+                    attachLogFlightListeners();
+                    break;
+                case 'costs':
+                    contentArea.innerHTML = renderCosts();
+                    attachCostsListeners();
+                    break;
+                case 'admin':
+                    if (isAdmin) {
+                         contentArea.innerHTML = renderAdmin();
+                         attachAdminListeners();
+                    } else {
+                         contentArea.innerHTML = renderUnauthorized();
+                    }
+                    break;
+                default:
+                    contentArea.innerHTML = renderDashboard();
+            }
+        }
+        
+        // --- VUES DES COMPOSANTS ---
+
+        function renderUnauthorized() {
+             return `<div class="${CardStyle} mt-8 max-w-lg mx-auto text-center">
+                        <h2 class="text-3xl font-extrabold text-red-600 mb-4">Accès Refusé</h2>
+                        <p class="text-gray-600">Vous n'avez pas les droits d'administrateur pour accéder à cette page.</p>
+                    </div>`;
+        }
+
+        function renderDashboard() {
+            const metrics = calculateCostMetrics();
+            const upcomingReservations = state.reservations
+                .filter(r => new Date(r.date) >= new Date(new Date().setHours(0,0,0,0))) // Filtre les futures
+                .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            return `
+                <div class="space-y-8">
+                    <h2 class="text-3xl font-extrabold text-gray-900">${state.aircraft.name} - Tableau de Bord</h2>
+                    
+                    <!-- Indicateurs Clés -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="${StatCardStyle}">
+                            <p class="text-sm font-medium text-gray-500">Heure Tachymétrique Actuelle</p>
+                            <p class="mt-1 text-3xl font-semibold text-indigo-600">${parseFloat(state.aircraft.latest_tach_hour).toFixed(1)} h</p>
+                        </div>
+                        <div class="${StatCardStyle}">
+                            <p class="text-sm font-medium text-gray-500">Heures Volées (Total)</p>
+                            <p class="mt-1 text-3xl font-semibold text-indigo-600">${metrics.totalHours} h</p>
+                        </div>
+                        <div class="${StatCardStyle}">
+                            <p class="text-sm font-medium text-gray-500">Coût Horaire Réel Estimé</p>
+                            <p class="mt-1 text-3xl font-semibold text-green-600">${formatCurrency(metrics.realHourlyCostTotal)}</p>
+                            <p class="text-xs text-gray-500">(${formatCurrency(metrics.realHourlyCostBase)} + ${formatCurrency(metrics.averageFuelCostPerHour)} Carburant)</p>
+                        </div>
+                        <div class="${StatCardStyle}">
+                            <p class="text-sm font-medium text-gray-500">Coût Annuel Fixe</p>
+                            <p class="mt-1 text-3xl font-semibold text-red-600">${formatCurrency(metrics.fixedCostPerYear)}</p>
+                        </div>
+                    </div>
+
+                    <!-- Planning des Réservations -->
+                    <div class="${CardStyle}">
+                        <h3 class="text-2xl font-semibold text-gray-900 mb-4">Prochaines Réservations (${upcomingReservations.length})</h3>
+                        <div class="space-y-3">
+                            ${upcomingReservations.slice(0, 5).map(res => `
+                                <div class="p-3 bg-indigo-50 rounded-lg flex justify-between items-center">
+                                    <div class="flex items-center space-x-3">
+                                        <div class="text-sm font-medium text-indigo-700">${res.date} (${res.start_time} - ${res.end_time})</div>
+                                        <div class="text-xs text-indigo-500">Pilote: ${res.pilot_name}</div>
+                                    </div>
+                                    <button onclick="changeView('reservation')" class="text-xs text-indigo-600 hover:text-indigo-800">Voir tout</button>
+                                </div>
+                            `).join('') || '<p class="text-gray-500">Aucune réservation future planifiée.</p>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderReservation() {
+            const pilots = state.pilots;
+            const reservations = state.reservations;
+            const pilotOptions = pilots.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+
+            // Logique de calendrier simple
+            const today = new Date();
+            const currentMonth = today.getMonth();
+            const currentYear = today.getFullYear();
+            
+            const daysInMonth = (month, year) => new Date(year, month + 1, 0).getDate();
+            const firstDayOfMonth = (month, year) => new Date(year, month, 1).getDay();
+            
+            const generateCalendar = (month, year) => {
+                const totalDays = daysInMonth(month, year);
+                // 0 = Dimanche, 1 = Lundi, etc. (ajustement pour Lundi=1)
+                const startDayIndex = (firstDayOfMonth(month, year) + 6) % 7; 
+                const monthName = new Date(year, month).toLocaleString('fr-FR', { month: 'long', year: 'numeric' });
+                
+                let calendarHtml = `<h4 class="text-center font-semibold text-xl mb-4 text-indigo-700">${monthName}</h4>
+                                    <div class="grid grid-cols-7 text-center text-xs font-medium text-gray-500 mb-2">
+                                        <div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div>
+                                    </div>
+                                    <div class="grid grid-cols-7 gap-1">`;
+                
+                // Jours vides
+                for (let i = 0; i < startDayIndex; i++) {
+                    calendarHtml += `<div class="p-2"></div>`;
+                }
+
+                for (let day = 1; day <= totalDays; day++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const dayReservations = reservations.filter(r => r.date === dateStr);
+                    const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                    const hasConflict = dayReservations.length > 1;
+
+                    let dayClass = isToday ? 'bg-indigo-200 font-bold' : 'bg-white hover:bg-indigo-50';
+                    dayClass += hasConflict ? ' border-2 border-red-500' : ' border border-gray-200';
+
+                    calendarHtml += `
+                        <div data-date="${dateStr}" class="${dayClass} p-2 rounded-lg cursor-pointer text-center text-sm relative calendar-day-box">
+                            ${day}
+                            ${dayReservations.length > 0 ? `<span class="absolute top-1 right-1 h-2 w-2 rounded-full ${hasConflict ? 'bg-red-500' : 'bg-green-500'}"></span>` : ''}
+                        </div>
+                    `;
+                }
+                
+                calendarHtml += `</div>`;
+                return calendarHtml;
+            };
+
+            return `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Colonne 1: Formulaire de Réservation -->
+                    <div class="lg:col-span-1 space-y-6">
+                        <div class="${CardStyle}">
+                            <h3 class="text-2xl font-semibold text-gray-900 mb-6">Nouvelle Réservation</h3>
+                            <form id="reservation-form" class="space-y-4">
+                                <div>
+                                    <label for="reservation-pilot" class="block text-sm font-medium text-gray-700 mb-1">Pilote / Co-propriétaire</label>
+                                    <select id="reservation-pilot" class="${InputStyle}" required>
+                                        <option value="">Sélectionnez le pilote</option>
+                                        ${pilotOptions}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="reservation-date" class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                                    <input type="date" id="reservation-date" class="${InputStyle}" required>
+                                </div>
+                                <div class="flex space-x-4">
+                                    <div class="w-1/2">
+                                        <label for="reservation-start" class="block text-sm font-medium text-gray-700 mb-1">Heure Début (HH:MM)</label>
+                                        <input type="time" id="reservation-start" class="${InputStyle}" value="10:00" required>
+                                    </div>
+                                    <div class="w-1/2">
+                                        <label for="reservation-end" class="block text-sm font-medium text-gray-700 mb-1">Heure Fin (HH:MM)</label>
+                                        <input type="time" id="reservation-end" class="${InputStyle}" value="12:00" required>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="reservation-title" class="block text-sm font-medium text-gray-700 mb-1">Objet de la réservation (optionnel)</label>
+                                    <input type="text" id="reservation-title" class="${InputStyle}" placeholder="Vol local, Entrainement, etc.">
+                                </div>
+                                <button type="submit" class="${PrimaryButtonStyle}">Enregistrer la Réservation</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Colonne 2 & 3: Calendrier et Liste -->
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="${CardStyle}">
+                            <h3 class="text-2xl font-semibold text-gray-900 mb-6">Planning des Vols</h3>
+                            <div id="calendar-view" class="p-4 bg-indigo-50 rounded-xl">
+                                ${generateCalendar(currentMonth, currentYear)}
+                            </div>
+                        </div>
+
+                        <!-- Détails des Réservations -->
+                        <div class="${CardStyle}">
+                             <h3 class="text-xl font-semibold text-gray-900 mb-4">Toutes les Réservations</h3>
+                             <div id="reservation-list" class="space-y-3">
+                                ${reservations.sort((a, b) => new Date(a.date) - new Date(b.date)).map(res => `
+                                    <div class="p-3 bg-white border border-gray-200 rounded-lg flex justify-between items-center hover:shadow-md transition">
+                                        <div class="flex-grow">
+                                            <p class="font-bold text-indigo-600">${res.date} (${res.start_time} - ${res.end_time})</p>
+                                            <p class="text-sm text-gray-700">${res.pilot_name} - ${res.title || 'Vol Planifié'}</p>
+                                        </div>
+                                        <button data-id="${res.id}" class="delete-reservation-btn text-red-500 hover:text-red-700 text-sm ml-4">
+                                            Supprimer
+                                        </button>
+                                    </div>
+                                `).join('') || '<p class="text-gray-500">Aucune réservation trouvée.</p>'}
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLogFlight() {
+            const pilots = state.pilots;
+            const pilotOptions = pilots.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+            
+            return `
+                <div class="${CardStyle} max-w-2xl mx-auto space-y-6">
+                    <h3 class="text-2xl font-semibold text-gray-900 mb-6">Enregistrer un Vol Terminé</h3>
+                    <p class="text-sm text-gray-600">Heure Tachymétrique Actuelle: <span class="font-bold text-indigo-600">${parseFloat(state.aircraft.latest_tach_hour).toFixed(1)} h</span></p>
+
+                    <form id="log-flight-form" class="space-y-4">
+                        <div>
+                            <label for="log-pilot" class="block text-sm font-medium text-gray-700 mb-1">Pilote</label>
+                            <select id="log-pilot" class="${InputStyle} p-4" required>
+                                <option value="">Sélectionnez le pilote</option>
+                                ${pilotOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="log-date" class="block text-sm font-medium text-gray-700 mb-1">Date du Vol</label>
+                            <input type="date" id="log-date" class="${InputStyle} p-4" required>
+                        </div>
+                        <div>
+                            <label for="log-start-tach" class="block text-sm font-medium text-gray-700 mb-1">Heure Tachymétrique Début (Ex: 105.5)</label>
+                            <input type="number" step="0.1" id="log-start-tach" class="${InputStyle} p-4" placeholder="${parseFloat(state.aircraft.latest_tach_hour).toFixed(1)}" required>
+                            <p class="text-xs text-gray-500 mt-1">Doit être inférieure ou égale à l'heure tachymétrique actuelle.</p>
+                        </div>
+                        <div>
+                            <label for="log-end-tach" class="block text-sm font-medium text-gray-700 mb-1">Heure Tachymétrique Fin (Ex: 106.8)</label>
+                            <input type="number" step="0.1" id="log-end-tach" class="${InputStyle} p-4" required>
+                            <p class="text-xs text-gray-500 mt-1">Doit être supérieure à l'heure Tachymétrique Début.</p>
+                        </div>
+                        <div>
+                            <label for="log-fuel-cost" class="block text-sm font-medium text-gray-700 mb-1">Coût Total du Carburant (€)</label>
+                            <input type="number" step="0.01" id="log-fuel-cost" class="${InputStyle} p-4" value="0.00" required>
+                        </div>
+                        <button type="submit" class="${PrimaryButtonStyle}">Valider et Mettre à Jour le Compteur</button>
+                    </form>
+                </div>
+            `;
+        }
+
+        function renderCosts() {
+            const metrics = calculateCostMetrics();
+            
+            // Regrouper les dépenses par catégorie
+            const groupedExpenses = state.expenses.reduce((acc, expense) => {
+                const category = state.expenseCategories.find(c => c.value === expense.type)?.label || 'Non classé';
+                if (!acc[category]) {
+                    acc[category] = [];
+                }
+                acc[category].push(expense);
+                return acc;
+            }, {});
+
+            const totalExpenses = state.expenses.reduce((sum, exp) => sum + parseFloat(exp.cost || 0), 0);
+
+            return `
+                <div class="space-y-8">
+                    <h2 class="text-3xl font-extrabold text-gray-900">Comptabilité & Coûts ${state.aircraft.name}</h2>
+                    
+                    <!-- Coût Horaire et Synthèse -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                         <div class="${StatCardStyle} lg:col-span-1 bg-indigo-50 border-indigo-300">
+                            <p class="text-sm font-medium text-indigo-600">Coût Horaire Réel</p>
+                            <p class="mt-1 text-4xl font-bold text-indigo-700">${formatCurrency(metrics.realHourlyCostTotal)} / h</p>
+                            <p class="text-xs text-gray-500 mt-2">Calculé sur ${metrics.totalHours} heures de vol enregistrées.</p>
+                        </div>
+                        
+                        <!-- Section Calcul du Coût Horaire -->
+                        <div class="${CardStyle} lg:col-span-2">
+                            <h3 class="text-xl font-semibold text-gray-900 mb-4">Ventilation du Calcul</h3>
+                            <div class="space-y-2 text-sm text-gray-700">
+                                <p class="font-bold">Coût Horaire Réel = (Coûts Fixes + Coûts Variables) / Heures Totales Volées</p>
+                                <p class="mt-4">1. Coûts Fixes Annuels (Assurance, Hangar, etc.): <span class="font-semibold">${formatCurrency(metrics.fixedCostPerYear)}</span></p>
+                                <p>2. Coûts Variables (Maintenance, Frais, etc.): <span class="font-semibold">${formatCurrency(metrics.totalMaintenanceAndOther)}</span></p>
+                                <p>3. Coût Horaire Carburant Moyen: <span class="font-semibold">${formatCurrency(metrics.averageFuelCostPerHour)}</span></p>
+                                <p class="pt-2 border-t mt-4 text-sm text-indigo-600">Pour ajuster le Coût Fixe Annuel, allez dans l'onglet Admin.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dépenses Détaillées -->
+                    <div class="${CardStyle}">
+                        <h3 class="text-2xl font-semibold text-gray-900 mb-4 flex justify-between items-center">
+                            Dépenses Détaillées (Total: ${formatCurrency(totalExpenses)})
+                            <button id="add-expense-btn" class="text-sm bg-indigo-500 text-white px-3 py-1 rounded-full hover:bg-indigo-600 transition">
+                                + Ajouter une Dépense
+                            </button>
+                        </h3>
+                        
+                        <div class="space-y-6 mt-4">
+                            ${Object.keys(groupedExpenses).map(category => `
+                                <div>
+                                    <h4 class="text-lg font-semibold text-gray-700 border-b pb-1 mb-3">${category} (${formatCurrency(groupedExpenses[category].reduce((s, e) => s + parseFloat(e.cost), 0))})</h4>
+                                    <ul class="space-y-2">
+                                        ${groupedExpenses[category].sort((a, b) => new Date(b.date) - new Date(a.date)).map(exp => `
+                                            <li class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                                <div class="text-sm">
+                                                    <span class="font-medium">${exp.description}</span>
+                                                    <span class="text-gray-500 text-xs ml-2">(${exp.date})</span>
+                                                </div>
+                                                <span class="font-bold text-red-600">${formatCurrency(exp.cost)}</span>
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            `).join('') || '<p class="text-gray-500">Aucune dépense enregistrée (hors carburant).</p>'}
+                        </div>
+                    </div>
+                </div>
+                ${renderAddExpenseModal()}
+            `;
+        }
+
+        function renderAdmin() {
+            const pilots = state.pilots;
+            const aircraft = state.aircraft;
+
+            return `
+                <div class="space-y-8 max-w-4xl mx-auto">
+                    <h2 class="text-3xl font-extrabold text-gray-900">Tableau de Bord Administrateur</h2>
+
+                    <!-- Gestion ULM et Coûts Fixes -->
+                    <div class="${CardStyle}">
+                        <h3 class="text-2xl font-semibold text-gray-900 mb-4">Gestion de l'ULM (${aircraft.name})</h3>
+                        <form id="aircraft-settings-form" class="space-y-4">
+                            <div>
+                                <label for="aircraft-name" class="block text-sm font-medium text-gray-700 mb-1">Nom de l'ULM</label>
+                                <input type="text" id="aircraft-name" class="${InputStyle}" value="${aircraft.name || ''}" required>
+                            </div>
+                            <div>
+                                <label for="fixed-cost" class="block text-sm font-medium text-gray-700 mb-1">Coût Fixe Annuel (€)</label>
+                                <input type="number" step="0.01" id="fixed-cost" class="${InputStyle}" value="${aircraft.fixed_cost_annual || 0}" required>
+                                <p class="text-xs text-gray-500 mt-1">Somme des assurances, hangars, taxes, non liés aux heures de vol.</p>
+                            </div>
+                            <button type="submit" class="${PrimaryButtonStyle}">Sauvegarder les Paramètres ULM</button>
+                        </form>
+                    </div>
+
+                    <!-- Gestion des Pilotes/Co-propriétaires -->
+                    <div class="${CardStyle}">
+                        <h3 class="text-2xl font-semibold text-gray-900 mb-4">Gestion des Pilotes (Co-propriétaires)</h3>
+                        <div class="space-y-4">
+                            <form id="add-pilot-form" class="flex space-x-4">
+                                <input type="email" id="new-pilot-email" class="${InputStyle} flex-grow" placeholder="Email du nouveau pilote à ajouter" required>
+                                <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded-xl hover:bg-green-600 transition">Ajouter (Envoyer lien)</button>
+                            </form>
+                            
+                            <!-- Liste des Pilotes -->
+                            <div class="border p-4 rounded-xl space-y-2">
+                                ${pilots.map(p => `
+                                    <div class="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                                        <div class="text-sm">
+                                            <span class="font-bold">${p.name}</span>
+                                            <span class="text-gray-500 ml-2">(${p.email})</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2">
+                                            <span class="px-2 py-1 text-xs rounded-full ${p.isAdmin ? 'bg-red-100 text-red-700' : 'bg-indigo-100 text-indigo-700'}">${p.isAdmin ? 'Admin' : 'Membre'}</span>
+                                            ${p.id !== userId ? `<button data-id="${p.id}" class="toggle-admin-btn text-xs text-indigo-500 hover:text-indigo-700">Basculer Admin</button>` : ''}
+                                            <button data-id="${p.id}" class="delete-pilot-btn text-xs text-red-500 hover:text-red-700">Supprimer</button>
+                                        </div>
+                                    </div>
+                                `).join('') || '<p class="text-gray-500">Aucun pilote enregistré.</p>'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gestion des Catégories de Dépenses -->
+                    <div class="${CardStyle}">
+                        <h3 class="text-2xl font-semibold text-gray-900 mb-4">Gestion des Catégories de Dépenses</h3>
+                        <form id="add-category-form" class="flex space-x-4 mb-6">
+                            <input type="text" id="new-category-label" class="${InputStyle} flex-grow" placeholder="Nom de la nouvelle catégorie (Ex: Frais d'entretien)" required>
+                            <button type="submit" class="bg-indigo-500 text-white px-4 py-2 rounded-xl hover:bg-indigo-600 transition">Ajouter Catégorie</button>
+                        </form>
+                        
+                        <!-- Liste des Catégories -->
+                        <div class="space-y-2">
+                            ${state.expenseCategories.map(cat => `
+                                <div class="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                                    <span class="text-sm font-medium">${cat.label}</span>
+                                    <button data-id="${cat.id}" class="delete-category-btn text-xs text-red-500 hover:text-red-700">Supprimer</button>
+                                </div>
+                            `).join('') || '<p class="text-gray-500">Aucune catégorie de dépense trouvée.</p>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAddExpenseModal() {
+            const categoryOptions = state.expenseCategories.map(c => 
+                `<option value="${c.value}">${c.label}</option>`
+            ).join('');
+
+            return `
+                <div id="expense-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-6">
+                        <h3 class="text-2xl font-semibold text-gray-900 border-b pb-3">Ajouter une Nouvelle Dépense</h3>
+                        <form id="add-expense-form" class="space-y-4">
+                            <div>
+                                <label for="expense-date" class="block text-sm font-medium text-gray-700 mb-1">Date de la Dépense</label>
+                                <input type="date" id="expense-date" class="${InputStyle}" required>
+                            </div>
+                            <div>
+                                <label for="expense-category" class="block text-sm font-medium text-gray-700 mb-1">Type de Dépense</label>
+                                <select id="expense-category" class="${InputStyle}" required>
+                                    ${categoryOptions}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="expense-cost" class="block text-sm font-medium text-gray-700 mb-1">Montant (€)</label>
+                                <input type="number" step="0.01" id="expense-cost" class="${InputStyle}" required>
+                            </div>
+                             <div>
+                                <label for="expense-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                <input type="text" id="expense-description" class="${InputStyle}" placeholder="Détail de la facture" required>
+                            </div>
+                            <div class="flex justify-end space-x-3 pt-2">
+                                <button type="button" id="close-expense-modal" class="${SecondaryButtonStyle} w-auto px-6">Annuler</button>
+                                <button type="submit" class="${PrimaryButtonStyle} w-auto px-6">Enregistrer la Dépense</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        // --- GESTIONNAIRES D'ÉVÉNEMENTS (LOGIQUE DU SITE) ---
+
+        function attachReservationListeners() {
+            const form = document.getElementById('reservation-form');
+            if (!form) return;
+
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                const pilotName = document.getElementById('reservation-pilot').value;
+                const date = document.getElementById('reservation-date').value;
+                const startTime = document.getElementById('reservation-start').value;
+                const endTime = document.getElementById('reservation-end').value;
+                const title = document.getElementById('reservation-title').value;
+
+                if (pilotName && date && startTime && endTime) {
+                    const data = {
+                        pilot_name: pilotName,
+                        date: date,
+                        start_time: startTime,
+                        end_time: endTime,
+                        title: title,
+                        user_id: userId,
+                        created_at: new Date().toISOString()
+                    };
+                    await upsertDocument('reservations', data);
+                    form.reset();
+                }
+            };
+            
+            // Écouteur pour la suppression de réservation
+            document.querySelectorAll('.delete-reservation-btn').forEach(button => {
+                button.onclick = async () => {
+                    if (confirm("Êtes-vous sûr de vouloir supprimer cette réservation ?")) {
+                        const firestore = window.firebase.getFirestore(window.app);
+                        const docRef = window.firebase.doc(firestore, `${BASE_COLLECTION_PATH}/reservations/${button.dataset.id}`);
+                        await window.firebase.deleteDoc(docRef);
+                    }
+                };
+            });
+            
+             // Écouteur pour le calendrier (pour pré-remplir la date)
+            document.querySelectorAll('.calendar-day-box').forEach(dayBox => {
+                dayBox.onclick = () => {
+                    const date = dayBox.dataset.date;
+                    document.getElementById('reservation-date').value = date;
+                    // Optionnel: Afficher les détails de la réservation pour ce jour
+                };
+            });
+        }
+
+        function attachLogFlightListeners() {
+            const form = document.getElementById('log-flight-form');
+            if (!form) return;
+
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                const pilotName = document.getElementById('log-pilot').value;
+                const date = document.getElementById('log-date').value;
+                const startTach = parseFloat(document.getElementById('log-start-tach').value);
+                const endTach = parseFloat(document.getElementById('log-end-tach').value);
+                const fuelCost = parseFloat(document.getElementById('log-fuel-cost').value);
+                const latestTach = parseFloat(state.aircraft.latest_tach_hour);
+
+                if (endTach <= startTach || endTach <= latestTach) {
+                    alert("L'heure tachymétrique de fin doit être supérieure à l'heure de début ET supérieure au dernier compteur enregistré.");
                     return;
                 }
 
-                // Initialize App and Services
-                window.app = initializeApp(firebaseConfig);
-                window.db = getFirestore(window.app);
-                window.auth = getAuth(window.app);
+                const duration = (endTach - startTach).toFixed(2);
+                
+                const logData = {
+                    pilot_name: pilotName,
+                    date: date,
+                    start_tach_hours: startTach,
+                    end_tach_hours: endTach,
+                    duration_hours: duration,
+                    fuel_cost_total: fuelCost,
+                    user_id: userId,
+                    created_at: new Date().toISOString()
+                };
 
-                // Set Firestore log level for debugging
-                setLogLevel('debug');
+                // 1. Enregistrer le log de vol
+                await upsertDocument('flight_logs', logData);
 
-                // Authentication
-                onAuthStateChanged(window.auth, async (user) => {
-                    if (user) {
-                        window.userId = user.uid;
-                    } else {
-                        // Sign in with custom token if available, otherwise anonymously
-                        if (typeof __initial_auth_token !== 'undefined') {
-                            await signInWithCustomToken(window.auth, __initial_auth_token);
-                            window.userId = window.auth.currentUser.uid;
-                        } else {
-                            await signInAnonymously(window.auth);
-                            window.userId = window.auth.currentUser.uid;
-                        }
-                    }
+                // 2. Mettre à jour l'heure tachymétrique de l'ULM
+                await upsertDocument('aircraft', { latest_tach_hour: endTach }, AIRCRAFT_ID);
 
-                    // Once authenticated, start listening for data
-                    if (window.userId) {
-                        console.log("Authenticated with userId:", window.userId);
-                        document.getElementById('user-id-display').textContent = 'ID Utilisateur: ' + window.userId;
-                        startDataListeners();
-                        window.renderApp(); // Initial render after auth
-                    }
-                });
+                alert(`Vol de ${duration}h enregistré. Nouveau compteur ULM: ${endTach.toFixed(1)}h.`);
+                form.reset();
+            };
+        }
 
-            } catch (e) {
-                console.error("Firebase initialization failed:", e);
-                window.renderMessage("Erreur d'initialisation", "Impossible de se connecter à la base de données. Veuillez vérifier la console pour plus de détails.", "bg-red-500");
-            }
-        };
+        function attachCostsListeners() {
+            const addBtn = document.getElementById('add-expense-btn');
+            const modal = document.getElementById('expense-modal');
+            const closeBtn = document.getElementById('close-expense-modal');
+            const form = document.getElementById('add-expense-form');
 
-        // --- DATA LISTENERS (Firestore) ---
+            if (!addBtn || !modal || !closeBtn || !form) return;
 
-        const startDataListeners = () => {
-            if (!window.db || !window.userId) return;
-
-            // 1. Liste des ULM (Public/Shared data)
-            const ulmColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "ulmList");
-            onSnapshot(ulmColRef, (snapshot) => {
-                window.ulmList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                // If the list is empty, initialize with default values (e.g., for first run)
-                if (window.ulmList.length === 0) {
-                    initializeUlmList();
+            addBtn.onclick = () => modal.classList.remove('hidden');
+            closeBtn.onclick = () => modal.classList.add('hidden');
+            
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                const date = document.getElementById('expense-date').value;
+                const category = document.getElementById('expense-category').value;
+                const cost = parseFloat(document.getElementById('expense-cost').value);
+                const description = document.getElementById('expense-description').value;
+                
+                if (date && category && cost > 0 && description) {
+                    const data = {
+                        date: date,
+                        type: category,
+                        cost: cost,
+                        description: description,
+                        user_id: userId,
+                        created_at: new Date().toISOString()
+                    };
+                    await upsertDocument('expenses', data);
+                    form.reset();
+                    modal.classList.add('hidden');
                 }
-                window.renderApp();
-            }, (error) => {
-                console.error("Error listening to ULM list:", error);
-            });
+            };
+        }
 
-            // 2. Réservations (Public/Shared data)
-            const reservationsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "reservations");
-            onSnapshot(reservationsColRef, (snapshot) => {
-                window.reservations = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    date: doc.data().date ? doc.data().date.toDate() : null // Convert Firestore Timestamp to Date
-                })).sort((a, b) => (a.date < b.date ? -1 : 1));
-                window.renderApp();
-            }, (error) => {
-                console.error("Error listening to reservations:", error);
-            });
+        function attachAdminListeners() {
+            // Logique de l'ULM
+            const aircraftForm = document.getElementById('aircraft-settings-form');
+            if(aircraftForm) {
+                 aircraftForm.onsubmit = async (e) => {
+                    e.preventDefault();
+                    const name = document.getElementById('aircraft-name').value;
+                    const fixedCost = parseFloat(document.getElementById('fixed-cost').value);
+                    if (name && fixedCost >= 0) {
+                        await upsertDocument('aircraft', { name: name, fixed_cost_annual: fixedCost }, AIRCRAFT_ID);
+                        alert("Paramètres ULM sauvegardés.");
+                    }
+                };
+            }
 
-            // 3. Vols (Private user data)
-            const flightsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "flights");
-            onSnapshot(flightsColRef, (snapshot) => {
-                window.flights = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    date: doc.data().date ? doc.data().date.toDate() : null // Convert Firestore Timestamp to Date
-                })).sort((a, b) => (a.date < b.date ? 1 : -1)); // Sort by date descending (most recent first)
-                updateAccounts();
-                window.renderApp();
-            }, (error) => {
-                console.error("Error listening to flights:", error);
+            // Logique d'ajout de Catégorie de Dépense
+            const addCategoryForm = document.getElementById('add-category-form');
+            if(addCategoryForm) {
+                 addCategoryForm.onsubmit = async (e) => {
+                    e.preventDefault();
+                    const label = document.getElementById('new-category-label').value;
+                    if (label) {
+                        const value = label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                        const data = { label: label, value: value, isFixed: false };
+                        await upsertDocument('expense_categories', data);
+                        addCategoryForm.reset();
+                    }
+                };
+            }
+            
+            // Logique de suppression de catégorie
+            document.querySelectorAll('.delete-category-btn').forEach(button => {
+                button.onclick = async () => {
+                    if (confirm("Attention: Supprimer cette catégorie affectera les anciennes dépenses. Continuer ?")) {
+                         const firestore = window.firebase.getFirestore(window.app);
+                         const docRef = window.firebase.doc(firestore, `${BASE_COLLECTION_PATH}/expense_categories/${button.dataset.id}`);
+                         await window.firebase.deleteDoc(docRef);
+                    }
+                };
             });
+            
+            // Logique d'ajout de pilote (pour les applications réelles, ceci devrait envoyer un e-mail d'invitation)
+             const addPilotForm = document.getElementById('add-pilot-form');
+             if(addPilotForm) {
+                 addPilotForm.onsubmit = async (e) => {
+                    e.preventDefault();
+                    const email = document.getElementById('new-pilot-email').value;
+                    if (email) {
+                        alert(`Fonctionnalité d'invitation par email non implémentée. Pour ajouter des pilotes, demandez-leur de se connecter. Leur profil sera créé à la connexion.`);
+                        addPilotForm.reset();
+                    }
+                };
+             }
 
-            // 4. Comptes (Private user data, stored as a single document)
-            const accountDocRef = doc(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "accounts", "userBalance");
-            onSnapshot(accountDocRef, (docSnapshot) => {
-                if (docSnapshot.exists()) {
-                    window.accounts = docSnapshot.data();
+            // Logique de bascule Admin
+            document.querySelectorAll('.toggle-admin-btn').forEach(button => {
+                button.onclick = async () => {
+                    const pilotId = button.dataset.id;
+                    const pilot = state.pilots.find(p => p.id === pilotId);
+                    if (pilot && confirm(`Basculer les droits Admin pour ${pilot.name} ?`)) {
+                        await upsertDocument('co_owners', { isAdmin: !pilot.isAdmin }, pilotId);
+                    }
+                };
+            });
+             
+            // Logique de suppression de pilote
+            document.querySelectorAll('.delete-pilot-btn').forEach(button => {
+                button.onclick = async () => {
+                    const pilotId = button.dataset.id;
+                    const pilot = state.pilots.find(p => p.id === pilotId);
+                    if (pilot && confirm(`Êtes-vous sûr de vouloir supprimer le profil de pilote ${pilot.name} ?`)) {
+                         const firestore = window.firebase.getFirestore(window.app);
+                         const docRef = window.firebase.doc(firestore, `${BASE_COLLECTION_PATH}/co_owners/${pilotId}`);
+                         await window.firebase.deleteDoc(docRef);
+                    }
+                };
+            });
+        }
+
+
+        // --- GESTION DES ÉVÉNEMENTS GLOBAUX ET INITIALISATION ---
+
+        function changeView(view) {
+            currentView = view;
+            renderApp();
+        }
+
+        function attachGlobalListeners() {
+            // Attacher les écouteurs de navigation
+            document.querySelectorAll('.nav-link').forEach(button => {
+                button.onclick = () => changeView(button.dataset.view);
+            });
+            
+            // Gestion de la déconnexion (Firebase)
+            document.getElementById('logout-button').onclick = async () => {
+                 if (confirm("Voulez-vous vraiment vous déconnecter ?")) {
+                    const auth = window.firebase.getAuth(window.app);
+                    await window.firebase.signOut(auth);
+                    // Force le rechargement pour réinitialiser l'état
+                    window.location.reload(); 
+                }
+            };
+        }
+
+        async function initializeFirebase() {
+            try {
+                // 1. Initialiser l'application Firebase
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                if (Object.keys(firebaseConfig).length === 0) {
+                    document.getElementById('loading-message').textContent = "ERREUR CRITIQUE: Configuration Firebase manquante. Vérifiez vos variables d'environnement.";
+                    throw new Error("Firebase config missing.");
+                }
+                
+                window.app = window.firebase.initializeApp(firebaseConfig);
+                window.db = window.firebase.getFirestore(window.app);
+                window.auth = window.firebase.getAuth(window.app);
+
+                // Définir le message de chargement
+                document.getElementById('loading-message').textContent = "Authentification en cours...";
+                
+                // 2. Tenter de se connecter (Via token initial ou Anonyme)
+                const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                
+                let user;
+                if (initialToken) {
+                    const userCredential = await window.firebase.signInWithCustomToken(window.auth, initialToken);
+                    user = userCredential.user;
                 } else {
-                    // Initialize if not exists
-                    window.accounts = { totalHours: 0, fuelBalance: 0, cashBalance: 0 };
-                    setDoc(accountDocRef, window.accounts);
+                    const userCredential = await window.firebase.signInAnonymously(window.auth);
+                    user = userCredential.user;
                 }
-                window.renderApp();
-            }, (error) => {
-                console.error("Error listening to accounts:", error);
-            });
-        };
-
-        // Initialize ULM list if empty (for new users/environments)
-        const initializeUlmList = async () => {
-            const ulmColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "ulmList");
-            const defaultUlms = [
-                { registration: 'F-JOLI', model: 'Sky Ranger', hourRate: 95, fuelConsumption: 12, maxFuel: 70 },
-                { registration: 'F-COOL', model: 'Savage Cub', hourRate: 110, fuelConsumption: 15, maxFuel: 80 },
-                { registration: 'F-ZEN', model: 'Nynja', hourRate: 100, fuelConsumption: 10, maxFuel: 60 },
-            ];
-            for (const ulm of defaultUlms) {
-                await addDoc(ulmColRef, ulm);
-            }
-        };
-
-        // --- ACCOUNTING LOGIC ---
-        const updateAccounts = () => {
-            let totalFlightTimeMinutes = 0;
-            let fuelConsumedLiters = 0;
-            let cashEarned = 0;
-
-            window.flights.forEach(flight => {
-                const durationMinutes = window.hhmmsToMinutes(flight.duration);
-                totalFlightTimeMinutes += durationMinutes;
-
-                const ulm = window.ulmList.find(u => u.registration === flight.ulmRegistration);
-                if (ulm) {
-                    // Fuel consumption calculation (simplified)
-                    const consumption = (ulm.fuelConsumption / 60) * durationMinutes;
-                    fuelConsumedLiters += consumption;
+                
+                // 3. Authentification réussie
+                if (user) {
+                    await upsertCoOwnerProfile(user); // Crée/met à jour le profil pilote
+                    setupListeners(); // Commence l'écoute en temps réel
                     
-                    // Cash earned/spent calculation (assuming hourRate is per flight hour in EUR)
-                    const hourRate = ulm.hourRate || 100; // Default rate if missing
-                    const cost = (hourRate / 60) * durationMinutes;
-                    cashEarned += cost; // Placeholder: Simplistically adding cost to cash for demonstration
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                    document.getElementById('app-container').classList.remove('hidden');
+                    attachGlobalListeners(); // Attache les écouteurs de navigation
+                    renderApp(); // Premier rendu de l'application
                 }
-            });
 
-            // Simplified update: Total hours flown, fuel balance (simulated), and cash balance (simulated)
-            const newAccounts = {
-                totalHours: totalFlightTimeMinutes,
-                fuelBalance: window.accounts.fuelBalance - fuelConsumedLiters, // Deduct consumed fuel
-                cashBalance: window.accounts.cashBalance + cashEarned // Add simulated income
-            };
-
-            const accountDocRef = doc(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "accounts", "userBalance");
-            setDoc(accountDocRef, newAccounts, { merge: true }).catch(e => console.error("Error updating accounts:", e));
-        };
-
-
-        // --- UI RENDERING & ROUTING ---
-
-        window.renderMessage = (title, message, bgColor = "bg-primary-blue") => {
-            const container = document.getElementById('main-content');
-            container.innerHTML = `
-                <div class="p-6 md:p-10 rounded-xl shadow-lg ${bgColor} text-white max-w-lg mx-auto mt-10">
-                    <h2 class="text-2xl font-bold mb-3">${title}</h2>
-                    <p>${message}</p>
-                </div>
-            `;
-        };
-
-        window.renderApp = () => {
-            const container = document.getElementById('main-content');
-            if (!window.userId) {
-                window.renderMessage("Chargement...", "Authentification en cours...", "bg-gray-500");
-                return;
-            }
-
-            // Simple client-side router
-            switch (window.currentView) {
-                case 'dashboard':
-                    container.innerHTML = renderDashboard();
-                    break;
-                case 'reservation':
-                    container.innerHTML = renderReservation();
-                    break;
-                case 'log-flight':
-                    container.innerHTML = renderLogFlight();
-                    break;
-                case 'accounting':
-                    container.innerHTML = renderAccounting();
-                    break;
-                default:
-                    container.innerHTML = renderDashboard();
-            }
-            // Re-attach event listeners after DOM update
-            attachEventListeners();
-        };
-
-        window.navigateTo = (view) => {
-            window.currentView = view;
-            window.renderApp();
-            // Close mobile menu after navigation
-            if (window.innerWidth < 768) {
-                document.getElementById('nav-menu').classList.remove('show-mobile');
-                document.getElementById('nav-menu').classList.add('hidden-mobile');
-                document.getElementById('menu-button').classList.remove('hidden');
-                document.getElementById('close-button').classList.add('hidden');
-            }
-        };
-
-        // --- VIEW TEMPLATES ---
-
-        const renderDashboard = () => {
-            const totalHours = window.formatHours(window.accounts.totalHours);
-            const nextReservation = window.reservations.find(r => r.date && r.date >= new Date());
-            const latestFlight = window.flights[0]; // Already sorted descending
-
-            return `
-                <div class="space-y-8 p-4 md:p-8">
-                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Tableau de Bord</h1>
-
-                    <!-- Statistiques Clés -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <!-- Total Heures de Vol -->
-                        <div class="bg-card-bg p-6 rounded-xl shadow-md transition duration-300 hover:shadow-lg border-t-4 border-primary-blue">
-                            <p class="text-sm font-medium text-gray-500">Total Heures de Vol (Pilote)</p>
-                            <p class="text-4xl font-bold text-primary-blue mt-1">${totalHours}</p>
-                        </div>
-                        <!-- Solde Caisse -->
-                        <div class="bg-card-bg p-6 rounded-xl shadow-md transition duration-300 hover:shadow-lg border-t-4 border-secondary-yellow">
-                            <p class="text-sm font-medium text-gray-500">Solde Caisse (Simulé)</p>
-                            <p class="text-4xl font-bold text-green-600 mt-1">${window.formatCurrency(window.accounts.cashBalance)}</p>
-                        </div>
-                        <!-- ULM Disponibles -->
-                        <div class="bg-card-bg p-6 rounded-xl shadow-md transition duration-300 hover:shadow-lg border-t-4 border-gray-400">
-                            <p class="text-sm font-medium text-gray-500">ULM Enregistrés</p>
-                            <p class="text-4xl font-bold text-gray-800 mt-1">${window.ulmList.length}</p>
-                        </div>
-                    </div>
-
-                    <!-- Prochaine Réservation -->
-                    <div class="bg-card-bg p-6 rounded-xl shadow-md">
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex justify-between items-center">
-                            Prochaine Réservation
-                            <button onclick="window.navigateTo('reservation')" class="text-sm font-medium text-primary-blue hover:text-primary-blue/80 transition">Voir toutes</button>
-                        </h2>
-                        ${nextReservation ? `
-                            <p class="text-2xl font-bold text-green-600">${nextReservation.ulmRegistration}</p>
-                            <p class="text-gray-600 mt-1">Le ${nextReservation.date.toLocaleDateString('fr-FR')} à ${nextReservation.date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
-                            <p class="text-sm text-gray-500 mt-2">Destination : ${nextReservation.destination}</p>
-                        ` : `
-                            <p class="text-gray-500 italic">Aucune réservation à venir.</p>
-                            <button onclick="window.navigateTo('reservation')" class="mt-3 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-secondary-yellow hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary-yellow">
-                                Réserver un ULM
-                            </button>
-                        `}
-                    </div>
-
-                    <!-- Dernier Vol -->
-                    <div class="bg-card-bg p-6 rounded-xl shadow-md">
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex justify-between items-center">
-                            Dernier Vol Enregistré
-                            <button onclick="window.navigateTo('log-flight')" class="text-sm font-medium text-primary-blue hover:text-primary-blue/80 transition">Voir Log de Vol</button>
-                        </h2>
-                        ${latestFlight ? `
-                            <div class="border-l-4 border-primary-blue pl-4">
-                                <p class="text-lg font-bold">${latestFlight.ulmRegistration} - ${latestFlight.date.toLocaleDateString('fr-FR')}</p>
-                                <p class="text-gray-600">Durée : <span class="font-semibold">${latestFlight.duration}</span></p>
-                                <p class="text-sm text-gray-500">De ${latestFlight.departure} à ${latestFlight.arrival}</p>
-                            </div>
-                        ` : `
-                            <p class="text-gray-500 italic">Aucun vol enregistré pour le moment.</p>
-                        `}
-                    </div>
-                </div>
-            `;
-        };
-
-        const renderReservation = () => {
-            const today = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM format
-
-            const reservationListHTML = window.reservations.length > 0
-                ? window.reservations.map(res => {
-                    const statusClass = res.date < new Date() ? 'text-red-500' : 'text-green-600';
-                    return `
-                        <div class="p-4 bg-white rounded-lg shadow flex justify-between items-center border-l-4 border-primary-blue">
-                            <div>
-                                <p class="text-lg font-semibold text-gray-800">${res.ulmRegistration} - ${res.destination}</p>
-                                <p class="text-sm text-gray-600">${res.date.toLocaleDateString('fr-FR')} à ${res.date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
-                                <p class="text-xs mt-1 ${statusClass}">${res.date < new Date() ? 'Passée' : 'À venir'}</p>
-                            </div>
-                            <button data-reservation-id="${res.id}" class="delete-reservation-btn text-red-500 hover:text-red-700 transition duration-150">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 6h6v10H7V6z" clip-rule="evenodd" /></svg>
-                            </button>
-                        </div>
-                    `;
-                }).join('')
-                : '<p class="text-gray-500 italic p-4 text-center">Aucune réservation enregistrée.</p>';
-
-            const ulmOptions = window.ulmList.map(ulm =>
-                `<option value="${ulm.registration}">${ulm.registration} (${ulm.model}) - ${ulm.hourRate}€/h</option>`
-            ).join('');
-
-            return `
-                <div class="space-y-8 p-4 md:p-8">
-                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Gestion des Réservations</h1>
-
-                    <!-- Formulaire de Nouvelle Réservation -->
-                    <div class="bg-card-bg p-6 rounded-xl shadow-lg">
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Nouvelle Réservation</h2>
-                        <form id="reservation-form" class="space-y-4">
-                            <div>
-                                <label for="res-ulm" class="block text-sm font-medium text-gray-700">ULM</label>
-                                <select id="res-ulm" required class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary-blue focus:border-primary-blue sm:text-sm rounded-md shadow-sm">
-                                    <option value="">Sélectionner un ULM</option>
-                                    ${ulmOptions}
-                                </select>
-                            </div>
-                            <div>
-                                <label for="res-datetime" class="block text-sm font-medium text-gray-700">Date & Heure</label>
-                                <input type="datetime-local" id="res-datetime" required min="${today}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
-                            </div>
-                            <div>
-                                <label for="res-destination" class="block text-sm font-medium text-gray-700">Destination/Note</label>
-                                <input type="text" id="res-destination" placeholder="Ex: Vol local, Navette LFPN" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
-                            </div>
-                            <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-blue hover:bg-primary-blue/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-blue transition duration-150">
-                                Enregistrer la Réservation
-                            </button>
-                        </form>
-                    </div>
-
-                    <!-- Liste des Réservations -->
-                    <div>
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Réservations Actuelles et Futures</h2>
-                        <div class="space-y-3">
-                            ${reservationListHTML}
-                        </div>
-                    </div>
-                </div>
-            `;
-        };
-
-        const renderLogFlight = () => {
-            const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
-
-            const flightListHTML = window.flights.length > 0
-                ? window.flights.map(flight => {
-                    return `
-                        <div class="p-4 bg-white rounded-lg shadow border-l-4 border-secondary-yellow">
-                            <p class="text-lg font-semibold text-gray-800">${flight.ulmRegistration} (${flight.date.toLocaleDateString('fr-FR')})</p>
-                            <p class="text-sm text-gray-600">Durée: <span class="font-bold text-primary-blue">${flight.duration}</span></p>
-                            <p class="text-xs text-gray-500">Départ: ${flight.departure}, Arrivée: ${flight.arrival}</p>
-                            <p class="text-xs text-gray-500">Notes: ${flight.notes || 'N/A'}</p>
-                        </div>
-                    `;
-                }).join('')
-                : '<p class="text-gray-500 italic p-4 text-center">Aucun vol enregistré.</p>';
-
-            const ulmOptions = window.ulmList.map(ulm =>
-                `<option value="${ulm.registration}">${ulm.registration} (${ulm.model})</option>`
-            ).join('');
-
-            return `
-                <div class="space-y-8 p-4 md:p-8">
-                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Log de Vol</h1>
-
-                    <!-- Formulaire d'Enregistrement de Vol -->
-                    <div class="bg-card-bg p-6 rounded-xl shadow-lg">
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Enregistrer un Nouveau Vol</h2>
-                        <form id="flight-log-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <!-- ULM -->
-                            <div>
-                                <label for="flight-ulm" class="block text-sm font-medium text-gray-700">ULM</label>
-                                <select id="flight-ulm" required class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary-blue focus:border-primary-blue sm:text-sm rounded-md shadow-sm">
-                                    <option value="">Sélectionner un ULM</option>
-                                    ${ulmOptions}
-                                </select>
-                            </div>
-                            <!-- Date -->
-                            <div>
-                                <label for="flight-date" class="block text-sm font-medium text-gray-700">Date</label>
-                                <input type="date" id="flight-date" required max="${today}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
-                            </div>
-                            <!-- Durée -->
-                            <div>
-                                <label for="flight-duration" class="block text-sm font-medium text-gray-700">Durée (HhMM)</label>
-                                <input type="text" id="flight-duration" pattern="\\d{1,2}h\\d{2}" placeholder="Ex: 1h30" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
-                                <p class="text-xs text-gray-500 mt-1">Format requis: 1h30, 0h45, 2h00</p>
-                            </div>
-                            <!-- Départ -->
-                            <div>
-                                <label for="flight-departure" class="block text-sm font-medium text-gray-700">Aérodrome de Départ</label>
-                                <input type="text" id="flight-departure" placeholder="Ex: LFPN" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
-                            </div>
-                            <!-- Arrivée -->
-                            <div>
-                                <label for="flight-arrival" class="block text-sm font-medium text-gray-700">Aérodrome d'Arrivée</label>
-                                <input type="text" id="flight-arrival" placeholder="Ex: LFPB" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
-                            </div>
-                            <!-- Notes -->
-                            <div class="md:col-span-2">
-                                <label for="flight-notes" class="block text-sm font-medium text-gray-700">Notes de Vol</label>
-                                <textarea id="flight-notes" rows="2" placeholder="Ex: Test moteur, atterrissages courts" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2"></textarea>
-                            </div>
-
-                            <div class="md:col-span-2">
-                                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-blue hover:bg-primary-blue/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-blue transition duration-150">
-                                    Enregistrer le Vol
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <!-- Liste des Vols -->
-                    <div>
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Historique des Vols</h2>
-                        <div class="space-y-3">
-                            ${flightListHTML}
-                        </div>
-                    </div>
-                </div>
-            `;
-        };
-
-        const renderAccounting = () => {
-            const cashClass = window.accounts.cashBalance >= 0 ? 'text-green-600' : 'text-red-600';
-            const fuelClass = window.accounts.fuelBalance >= 0 ? 'text-green-600' : 'text-red-600';
-            const totalHours = window.formatHours(window.accounts.totalHours);
-
-            // Placeholder for a list of transactions (to be implemented)
-            const transactionListHTML = '<p class="text-gray-500 italic">L’historique des transactions n’est pas encore disponible, mais le solde est mis à jour après chaque vol.</p>';
-
-            return `
-                <div class="space-y-8 p-4 md:p-8">
-                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Comptabilité & Bilans</h1>
-
-                    <!-- Solde Clés -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <!-- Total Heures de Vol -->
-                        <div class="bg-card-bg p-6 rounded-xl shadow-md border-t-4 border-gray-400">
-                            <p class="text-sm font-medium text-gray-500">Total Heures Volées</p>
-                            <p class="text-4xl font-bold text-gray-800 mt-1">${totalHours}</p>
-                        </div>
-                        <!-- Solde Caisse -->
-                        <div class="bg-card-bg p-6 rounded-xl shadow-md border-t-4 border-green-600">
-                            <p class="text-sm font-medium text-gray-500">Solde Caisse (Simulé)</p>
-                            <p class="text-4xl font-bold ${cashClass} mt-1">${window.formatCurrency(window.accounts.cashBalance)}</p>
-                        </div>
-                        <!-- Solde Carburant -->
-                        <div class="bg-card-bg p-6 rounded-xl shadow-md border-t-4 border-red-600">
-                            <p class="text-sm font-medium text-gray-500">Solde Carburant (Simulé - Litres)</p>
-                            <p class="text-4xl font-bold ${fuelClass} mt-1">${window.accounts.fuelBalance.toFixed(2)} L</p>
-                        </div>
-                    </div>
-
-                    <!-- Gestion des ULM (Tarifs) -->
-                    <div class="bg-card-bg p-6 rounded-xl shadow-lg">
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Tarifs des ULM</h2>
-                        <div class="space-y-3">
-                            ${window.ulmList.map(ulm => `
-                                <div class="flex justify-between items-center p-3 border-b">
-                                    <p class="font-semibold">${ulm.registration} (${ulm.model})</p>
-                                    <p class="text-primary-blue font-bold">${window.formatCurrency(ulm.hourRate)} / heure</p>
-                                    <p class="text-sm text-gray-500">${ulm.fuelConsumption} L/h</p>
-                                </div>
-                            `).join('')}
-                        </div>
-                        <p class="text-sm text-gray-500 mt-4 italic">Ces tarifs sont utilisés pour le calcul simulé du solde de caisse et de carburant.</p>
-                    </div>
-
-                    <!-- Historique des transactions (Futur) -->
-                    <div class="bg-card-bg p-6 rounded-xl shadow-md">
-                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Historique des Transactions</h2>
-                        ${transactionListHTML}
-                    </div>
-                </div>
-            `;
-        };
-
-        // --- EVENT HANDLERS (Firestore Operations) ---
-
-        const handleReservationSubmit = async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const ulmRegistration = form['res-ulm'].value;
-            const datetimeLocal = form['res-datetime'].value;
-            const destination = form['res-destination'].value;
-
-            if (!window.db || !window.userId || !ulmRegistration || !datetimeLocal) return;
-
-            // Convert local datetime string to Date object
-            const date = new Date(datetimeLocal);
-
-            const newReservation = {
-                ulmRegistration,
-                date,
-                destination: destination || 'Vol non spécifié',
-                reservedBy: window.userId,
-                createdAt: serverTimestamp()
-            };
-
-            try {
-                const reservationsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "reservations");
-                await addDoc(reservationsColRef, newReservation);
-                window.renderMessage("Succès !", `Réservation de ${ulmRegistration} pour le ${date.toLocaleString('fr-FR')} enregistrée.`, "bg-green-600");
-                setTimeout(() => window.navigateTo('reservation'), 1500);
             } catch (error) {
-                console.error("Error adding reservation:", error);
-                window.renderMessage("Erreur", "Impossible d'ajouter la réservation. Voir console.", "bg-red-500");
-            }
-        };
-
-        const handleDeleteReservation = async (e) => {
-            const button = e.target.closest('.delete-reservation-btn');
-            const reservationId = button?.dataset.reservationId;
-
-            if (!reservationId || !window.db) return;
-
-            // Use a custom modal/message box instead of confirm()
-            if (!await showConfirmationModal('Confirmation', 'Êtes-vous sûr de vouloir annuler cette réservation ?')) {
-                return;
-            }
-
-            try {
-                const reservationDocRef = doc(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "reservations", reservationId);
-                await deleteDoc(reservationDocRef);
-                window.renderMessage("Annulée", "La réservation a été supprimée.", "bg-gray-500");
-                setTimeout(() => window.navigateTo('reservation'), 1500);
-            } catch (error) {
-                console.error("Error deleting reservation:", error);
-                window.renderMessage("Erreur", "Impossible de supprimer la réservation. Voir console.", "bg-red-500");
-            }
-        };
-
-        const handleFlightLogSubmit = async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const ulmRegistration = form['flight-ulm'].value;
-            const dateStr = form['flight-date'].value;
-            const duration = form['flight-duration'].value;
-            const departure = form['flight-departure'].value;
-            const arrival = form['flight-arrival'].value;
-            const notes = form['flight-notes'].value;
-
-            if (!window.db || !window.userId || !ulmRegistration || !dateStr || !duration) return;
-
-            // Simple date conversion for Firestore
-            const date = new Date(dateStr);
-
-            const newFlight = {
-                ulmRegistration,
-                date,
-                duration,
-                departure,
-                arrival,
-                notes,
-                pilotId: window.userId,
-                createdAt: serverTimestamp()
-            };
-
-            try {
-                const flightsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "flights");
-                await addDoc(flightsColRef, newFlight);
-                window.renderMessage("Vol Enregistré", `${ulmRegistration} - ${duration} ajouté à votre log.`, "bg-green-600");
-                setTimeout(() => window.navigateTo('log-flight'), 1500);
-            } catch (error) {
-                console.error("Error adding flight log:", error);
-                window.renderMessage("Erreur", "Impossible d'ajouter le vol. Voir console.", "bg-red-500");
-            }
-        };
-
-        // --- MODAL / MESSAGE BOX IMPLEMENTATION (Replacing alert/confirm) ---
-
-        // Function to show a custom confirmation modal
-        window.showConfirmationModal = (title, message) => {
-            return new Promise(resolve => {
-                const modalHtml = `
-                    <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
-                        <div class="bg-white rounded-lg p-6 shadow-xl max-w-sm w-full">
-                            <h3 class="text-lg font-bold text-gray-900 mb-4">${title}</h3>
-                            <p class="text-sm text-gray-500 mb-6">${message}</p>
-                            <div class="flex justify-end space-x-3">
-                                <button id="modal-cancel" class="px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-gray-200 hover:bg-gray-300 transition">
-                                    Annuler
-                                </button>
-                                <button id="modal-confirm" class="px-4 py-2 text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 transition">
-                                    Confirmer
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                console.error("Erreur critique d'initialisation/authentification:", error);
+                document.getElementById('loading-message').innerHTML = `
+                    ERREUR CRITIQUE: Échec de l'authentification.
+                    <p class="text-sm text-red-500 mt-2">Détails: ${error.message}</p>
+                    <p class="text-xs mt-4">Vérifiez vos clés Firebase et les règles de sécurité (RLS).</p>
                 `;
-                document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-                const modal = document.getElementById('custom-modal');
-                document.getElementById('modal-cancel').onclick = () => {
-                    modal.remove();
-                    resolve(false);
-                };
-                document.getElementById('modal-confirm').onclick = () => {
-                    modal.remove();
-                    resolve(true);
-                };
-            });
-        };
-
-        // --- GENERAL EVENT LISTENERS & INITIALIZATION ---
-
-        const attachEventListeners = () => {
-            // Reservation Form
-            const resForm = document.getElementById('reservation-form');
-            if (resForm) {
-                resForm.onsubmit = handleReservationSubmit;
             }
+        }
 
-            // Delete Reservation Buttons
-            document.querySelectorAll('.delete-reservation-btn').forEach(button => {
-                button.onclick = handleDeleteReservation;
-            });
-
-            // Flight Log Form
-            const flightForm = document.getElementById('flight-log-form');
-            if (flightForm) {
-                flightForm.onsubmit = handleFlightLogSubmit;
-            }
-
-            // Mobile Menu Toggle
-            const menuButton = document.getElementById('menu-button');
-            const closeButton = document.getElementById('close-button');
-            const navMenu = document.getElementById('nav-menu');
-
-            if (menuButton && closeButton && navMenu) {
-                menuButton.onclick = () => {
-                    navMenu.classList.remove('hidden-mobile');
-                    navMenu.classList.add('show-mobile');
-                    menuButton.classList.add('hidden');
-                    closeButton.classList.remove('hidden');
-                };
-                closeButton.onclick = () => {
-                    navMenu.classList.remove('show-mobile');
-                    navMenu.classList.add('hidden-mobile');
-                    menuButton.classList.remove('hidden');
-                    closeButton.classList.add('hidden');
-                };
-            }
-        };
-
-        // Start the application after the document is loaded
+        // Démarrer l'application au chargement complet de la page
         window.onload = initializeFirebase;
-
+        window.changeView = changeView; // Rendre la fonction accessible globalement pour les onclicks dans le HTML
+        
     </script>
-
-
-    <!-- --- APPLICATION STRUCTURE (HTML) --- -->
-
-    <!-- Header / Navigation Bar -->
-    <header class="bg-primary-blue text-white shadow-lg sticky top-0 z-40">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
-                <!-- Logo/Title -->
-                <div class="flex-shrink-0">
-                    <span class="text-xl font-bold tracking-wider">ULM Manager</span>
-                </div>
-
-                <!-- Desktop Menu -->
-                <nav class="hidden md:flex md:space-x-8">
-                    <button onclick="window.navigateTo('dashboard')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Tableau de Bord</button>
-                    <button onclick="window.navigateTo('reservation')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Réservations</button>
-                    <button onclick="window.navigateTo('log-flight')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Log de Vol</button>
-                    <button onclick="window.navigateTo('accounting')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Comptabilité</button>
-                </nav>
-
-                <!-- Mobile Menu Button -->
-                <div class="md:hidden flex items-center">
-                    <button id="menu-button" type="button" class="inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-primary-blue/70 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white">
-                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
-                    </button>
-                    <button id="close-button" type="button" class="hidden inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-primary-blue/70 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white">
-                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Mobile Menu (Hidden by default) -->
-        <div id="nav-menu" class="md:hidden absolute top-0 left-0 h-screen w-3/4 bg-primary-blue shadow-2xl hidden-mobile">
-            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3 mt-16">
-                <button onclick="window.navigateTo('dashboard')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Tableau de Bord</button>
-                <button onclick="window.navigateTo('reservation')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Réservations</button>
-                <button onclick="window.navigateTo('log-flight')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Log de Vol</button>
-                <button onclick="window.navigateTo('accounting')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Comptabilité</button>
-            </div>
-            <div class="px-5 py-3 border-t border-primary-blue/50">
-                <p id="user-id-display" class="text-xs text-gray-400">ID Utilisateur: Chargement...</p>
-            </div>
-        </div>
-    </header>
-
-    <!-- Main Content Area -->
-    <main class="flex-grow max-w-7xl mx-auto w-full">
-        <div id="main-content" class="p-4 sm:p-6 lg:p-8">
-            <!-- Content will be injected here by JavaScript (renderApp function) -->
-            <div class="flex justify-center items-center h-64">
-                <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary-blue"></div>
-                <p class="ml-4 text-primary-blue font-semibold">Chargement de l'application...</p>
-            </div>
-        </div>
-    </main>
-
-    <!-- Footer (Optional) -->
-    <footer class="bg-gray-800 text-white p-4 text-center text-sm mt-auto">
-        <p>&copy; 2024 ULM Manager. Propulsé par Google & Firebase.</p>
-    </footer>
-
 </body>
 </html>

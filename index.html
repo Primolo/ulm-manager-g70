@@ -15,7 +15,7 @@
             background-color: #f3f4f6;
         }
         .main-content {
-            min-height: calc(100vh - 4rem); /* Hauteur moins la barre de navigation */
+            min-height: calc(100vh - 4rem);
         }
         .loading-overlay {
             position: fixed;
@@ -42,10 +42,10 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <p id="loading-message" class="mt-4 text-gray-700">Chargement... Connexion Supabase en cours...</p>
+        <p id="loading-message" class="mt-4 text-gray-700">Connexion Supabase en cours...</p>
     </div>
 
-    <!-- Conteneur Principal de l'Application (Masqué jusqu'à l'authentification) -->
+    <!-- Conteneur Principal de l'Application -->
     <div id="app-container" class="hidden">
         <!-- Barre de Navigation -->
         <nav class="bg-white shadow-lg fixed top-0 w-full z-10">
@@ -80,12 +80,16 @@
         </main>
     </div>
 
+    <!-- Conteneur d'Authentification -->
+    <div id="auth-container" class="hidden min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    </div>
+
     <!-- JavaScript Logique -->
     <script>
         // --- CONFIGURATION CRITIQUE SUPABASE ---
-        // IMPORTANT : Ces clés sont publiques mais doivent pointer vers votre projet Supabase.
-        const SUPABASE_URL = "https://ikileeetvexzkybwzuxv.supabase.co"; // Ex: 'https://xxxx.supabase.co'
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlraWxlZWV0dmV4emt5Ynd6dXh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2MjE3ODYsImV4cCI6MjA3NjE5Nzc4Nn0._Zabpl-p9hMGyQUVZIeNAz40qmpqTt4QM2yQo7YV0Fg"; // Ex: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        // REMPLACEZ CES VALEURS PAR VOS CLÉS RÉELLES OBTENUES DE SUPABASE STUDIO
+        const SUPABASE_URL = "VOTRE_URL_PROJET_SUPABASE"; 
+        const SUPABASE_ANON_KEY = "VOTRE_CLE_ANON_PUBLIQUE"; 
 
         let supabase = null;
         if (window.supabase && SUPABASE_URL !== "VOTRE_URL_PROJET_SUPABASE") {
@@ -127,13 +131,10 @@
 
             const fixedCostPerYear = parseFloat(state.aircraft.fixed_cost_annual || 0);
 
-            // Coût Annuel Total = Coût Fixe + (Maintenance + Autres Dépenses)
             const totalAnnualCost = fixedCostPerYear + totalMaintenanceAndOther;
 
-            // Coût Horaire Réel = Coût Annuel Total / Total Heures Volées (si > 0)
             const realHourlyCostBase = totalHours > 0 ? (totalAnnualCost / totalHours) : 0;
             
-            // Coût Horaire Total (incluant carburant par heure volée)
             const averageFuelCostPerHour = totalHours > 0 ? (totalFuelCost / totalHours) : 0;
             
             const realHourlyCostTotal = realHourlyCostBase + averageFuelCostPerHour;
@@ -150,20 +151,15 @@
             };
         };
         
-        // --- LOGIQUE CRUD SUPABASE ---
+        // --- LOGIQUE CRUD SUPABASE (simplifiée) ---
 
-        // Fonction pour insérer un nouveau document
         async function insertDocument(tableName, data) {
-            if (!supabase) {
-                console.error("Erreur: Client Supabase non initialisé.");
-                return null;
-            }
+            if (!supabase) return null;
             try {
                 const { data: result, error } = await supabase
                     .from(tableName)
                     .insert([{ ...data, created_at: new Date().toISOString() }])
                     .select();
-
                 if (error) throw error;
                 return result[0];
             } catch (error) {
@@ -173,40 +169,30 @@
             }
         }
 
-        // Fonction pour mettre à jour ou insérer (pour les paramètres ULM et le profil pilote)
         async function upsertDocument(tableName, data, primaryKeyValue) {
-            if (!supabase) {
-                console.error("Erreur: Client Supabase non initialisé.");
-                return null;
-            }
+            if (!supabase) return null;
             try {
-                // Tentative de mise à jour si l'ID existe
-                const { data: existing, error: fetchError } = await supabase
+                const { data: existing } = await supabase
                     .from(tableName)
                     .select('*')
                     .eq('id', primaryKeyValue)
                     .maybeSingle();
 
-                if (fetchError) throw fetchError;
-                
                 let result;
                 if (existing) {
-                    // Mise à jour
-                    const { data: updated, error: updateError } = await supabase
+                    const { data: updated, error } = await supabase
                         .from(tableName)
                         .update(data)
                         .eq('id', primaryKeyValue)
                         .select();
-                    if (updateError) throw updateError;
+                    if (error) throw error;
                     result = updated;
-
                 } else {
-                    // Insertion (avec l'ID spécifié)
-                    const { data: inserted, error: insertError } = await supabase
+                    const { data: inserted, error } = await supabase
                         .from(tableName)
                         .insert([{ ...data, id: primaryKeyValue, created_at: new Date().toISOString() }])
                         .select();
-                    if (insertError) throw insertError;
+                    if (error) throw error;
                     result = inserted;
                 }
                 
@@ -224,7 +210,6 @@
         function setupListeners() {
             if (!supabase) return;
             
-            // Fonction de récupération générique et d'écoute
             const setupRealtime = (tableName, setState, isSingle = false) => {
                 const channelName = `${tableName}_channel`;
 
@@ -247,7 +232,6 @@
                     } else if (!isSingle && data) {
                         setState(data.map(item => ({ id: item.id, ...item })));
                     } else if (isSingle && !data) {
-                        // Document ULM non trouvé. Création des données initiales.
                         if (tableName === 'aircraft') {
                             initializeUlmData();
                         }
@@ -257,7 +241,6 @@
 
                 fetchAndSet();
 
-                // Écouteur temps réel
                 supabase.channel(channelName)
                     .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, fetchAndSet)
                     .subscribe();
@@ -277,14 +260,14 @@
             });
         }
 
-        // --- FONCTIONS D'INITIALISATION DE LA BASE DE DONNÉES ---
+        // --- FONCTIONS D'INITIALISATION ET D'AUTH ---
 
         async function initializeUlmData() {
             const data = {
                 name: 'ULM G70',
                 fixed_cost_annual: 5000,
                 latest_tach_hour: 0.0,
-                id: AIRCRAFT_ID // Clé primaire
+                id: AIRCRAFT_ID 
             };
             await upsertDocument('aircraft', data, AIRCRAFT_ID);
         }
@@ -302,16 +285,15 @@
             }
         }
         
-        // Crée le profil du co-propriétaire (appelé après l'authentification)
         async function upsertCoOwnerProfile(user) {
             if (!user) return;
             
             const pilot = state.pilots.find(p => p.id === user.id);
             const data = {
-                id: user.id, // UID Supabase est l'ID de la table co_owners
-                email: user.email || 'Anonyme',
+                id: user.id, 
+                email: user.email || 'N/A',
                 name: user.email ? user.email.split('@')[0] : `Pilote-${user.id.substring(0, 4)}`,
-                isAdmin: pilot ? pilot.isAdmin : state.pilots.length === 0, // Premier utilisateur est Admin
+                isAdmin: pilot ? pilot.isAdmin : state.pilots.length === 0, 
                 lastLogin: new Date().toISOString()
             };
             
@@ -321,31 +303,69 @@
                 isAdmin = data.isAdmin;
                 document.getElementById('user-info').textContent = `Pilote: ${data.name}`;
                 document.getElementById('admin-nav-link').classList.toggle('hidden', !isAdmin);
-                
-                // Masquer le login et montrer l'app
-                document.getElementById('loading-overlay').classList.add('hidden');
-                document.getElementById('app-container').classList.remove('hidden');
-                attachGlobalListeners(); 
-                renderApp(); 
             }
         }
 
-        // --- GESTION DES VUES (Fonctions non détaillées ici pour concision, mais présentes dans le code complet) ---
+        // --- COMPOSANTS DE VUE (RENDUS) ---
+
+        function renderAuthPage() {
+            return `
+                <div class="max-w-md w-full space-y-8 bg-white p-10 rounded-2xl shadow-xl">
+                    <div class="text-center">
+                        <h2 class="mt-6 text-3xl font-extrabold text-gray-900">Connexion & Inscription</h2>
+                        <p class="mt-2 text-sm text-gray-600">Entrez votre email et mot de passe pour accéder à la gestion de l'ULM.</p>
+                    </div>
+                    <form id="auth-form" class="mt-8 space-y-6">
+                        <input type="hidden" name="remember" value="true">
+                        <div class="rounded-md shadow-sm -space-y-px">
+                            <div>
+                                <label for="email-address" class="sr-only">Adresse Email</label>
+                                <input id="email-address" name="email" type="email" autocomplete="email" required
+                                    class="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-xl focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                    placeholder="Adresse Email">
+                            </div>
+                            <div>
+                                <label for="password" class="sr-only">Mot de passe</label>
+                                <input id="password" name="password" type="password" autocomplete="current-password" required
+                                    class="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-xl focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                    placeholder="Mot de passe (Min. 6 caractères)">
+                            </div>
+                        </div>
+                        <p id="auth-message" class="text-sm text-red-500 hidden"></p>
+                        <div>
+                            <button type="submit" data-action="login" class="${PrimaryButtonStyle}">
+                                Se Connecter
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-center">
+                            <button type="submit" data-action="signup" class="text-sm text-indigo-600 hover:text-indigo-500 font-medium">
+                                Pas de compte ? S'inscrire ici
+                            </button>
+                        </div>
+                        <div class="text-center">
+                            <button type="submit" data-action="otp" class="text-xs text-gray-500 hover:text-indigo-500 font-medium">
+                                Mot de passe oublié ? Recevoir un lien magique (OTP)
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }
 
         function renderUnauthorized() {
-            return `<div class="${CardStyle} mt-8 max-w-lg mx-auto text-center">
-                       <h2 class="text-3xl font-extrabold text-red-600 mb-4">Accès Refusé</h2>
-                       <p class="text-gray-600">Vous n'avez pas les droits d'administrateur pour accéder à cette page.</p>
-                   </div>`;
+             return `<div class="${CardStyle} mt-8 max-w-lg mx-auto text-center">
+                        <h2 class="text-3xl font-extrabold text-red-600 mb-4">Accès Refusé</h2>
+                        <p class="text-gray-600">Vous n'avez pas les droits d'administrateur pour accéder à cette page.</p>
+                    </div>`;
         }
         
-        function renderDashboard() { /* ... Contenu du Dashboard ... */ return `<div class="${CardStyle}">Tableau de Bord</div>`; }
-        function renderReservation() { /* ... Contenu Réservation ... */ return `<div class="${CardStyle}">Réservations</div>`; }
-        function renderLogFlight() { /* ... Contenu Log Vol ... */ return `<div class="${CardStyle}">Loguer Vol</div>`; }
-        function renderCosts() { /* ... Contenu Comptabilité ... */ return `<div class="${CardStyle}">Comptabilité</div>`; }
-        function renderAdmin() { /* ... Contenu Admin ... */ return `<div class="${CardStyle}">Administration</div>`; }
+        function renderDashboard() { /* ... Dashboard ... */ return `<div class="${CardStyle}">Tableau de Bord</div>`; }
+        function renderReservation() { /* ... Réservations ... */ return `<div class="${CardStyle}">Réservations</div>`; }
+        function renderLogFlight() { /* ... Log Vol ... */ return `<div class="${CardStyle}">Loguer Vol</div>`; }
+        function renderCosts() { /* ... Comptabilité ... */ return `<div class="${CardStyle}">Comptabilité</div>`; }
+        function renderAdmin() { /* ... Admin ... */ return `<div class="${CardStyle}">Administration</div>`; }
         
-        // La fonction réelle renderApp doit être là pour mettre à jour l'interface
+
         function renderApp() {
             document.querySelectorAll('.nav-link').forEach(link => {
                 link.classList.remove('border-indigo-500', 'text-indigo-600');
@@ -371,6 +391,46 @@
 
 
         // --- GESTION DES ÉVÉNEMENTS GLOBAUX ET INITIALISATION ---
+        
+        function setAuthMessage(msg, isError = true) {
+            const el = document.getElementById('auth-message');
+            if (!el) return;
+            el.textContent = msg;
+            el.classList.remove('hidden', 'text-red-500', 'text-green-500');
+            el.classList.add(isError ? 'text-red-500' : 'text-green-500');
+        }
+
+        function attachAuthListeners() {
+            const form = document.getElementById('auth-form');
+            if (!form) return;
+
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('email-address').value;
+                const password = document.getElementById('password').value;
+                const action = e.submitter.dataset.action;
+                
+                setAuthMessage("Traitement en cours...", false);
+
+                let response;
+                if (action === 'login') {
+                    response = await supabase.auth.signInWithPassword({ email, password });
+                } else if (action === 'signup') {
+                    response = await supabase.auth.signUp({ email, password });
+                } else if (action === 'otp') {
+                    response = await supabase.auth.signInWithOtp({ email });
+                }
+
+                if (response.error) {
+                    setAuthMessage(response.error.message, true);
+                } else if (action === 'signup' || action === 'otp') {
+                    setAuthMessage("Veuillez vérifier votre email pour le lien de connexion ou pour confirmer votre inscription.", false);
+                } else {
+                    // La redirection vers l'app se fera via onAuthStateChange
+                    setAuthMessage("Connexion réussie. Redirection...", false);
+                }
+            };
+        }
 
         function attachGlobalListeners() {
             document.querySelectorAll('.nav-link').forEach(button => {
@@ -391,40 +451,50 @@
         }
 
         async function initializeSupabase() {
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const authContainer = document.getElementById('auth-container');
+            const appContainer = document.getElementById('app-container');
+
             if (!supabase) {
-                document.getElementById('loading-message').textContent = "ERREUR CRITIQUE: Configuration Supabase manquante. Veuillez insérer votre URL et clé publique.";
+                loadingOverlay.classList.remove('hidden');
+                document.getElementById('loading-message').textContent = "ERREUR CRITIQUE: Configuration Supabase manquante. Insérez vos clés pour continuer.";
                 return;
             }
 
-            document.getElementById('loading-message').textContent = "Authentification Supabase en cours...";
-            
-            // Écoute les changements d'état d'authentification
+            // 1. Écoute des changements d'état d'authentification
             supabase.auth.onAuthStateChange(async (event, session) => {
                 if (session) {
-                    // Utilisateur connecté
+                    // Utilisateur CONNECTÉ
+                    userId = session.user.id;
                     setupListeners(); // Lance l'écoute temps réel
                     await upsertCoOwnerProfile(session.user);
+                    
+                    loadingOverlay.classList.add('hidden');
+                    authContainer.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+                    attachGlobalListeners();
+                    renderApp(); 
                 } else {
-                    // Aucun utilisateur connecté, force la connexion anonyme pour les tests simples
-                    const { data, error } = await supabase.auth.signInAnonymously();
-                    if (error) {
-                         document.getElementById('loading-message').textContent = `Erreur de connexion: ${error.message}`;
-                    } else if (data.user) {
-                         // Authentifié anonymement, upsertCoOwnerProfile sera appelé par onAuthStateChange
-                    } else {
-                         document.getElementById('loading-message').textContent = "Authentification échouée. Vérifiez vos règles RLS.";
-                    }
+                    // Utilisateur DÉCONNECTÉ
+                    loadingOverlay.classList.add('hidden');
+                    appContainer.classList.add('hidden');
+                    authContainer.classList.remove('hidden');
+                    authContainer.innerHTML = renderAuthPage();
+                    attachAuthListeners();
                 }
             });
 
-            // Une fois que tout est chargé, on débloque l'interface.
-            // Le déblocage réel se fera dans upsertCoOwnerProfile pour garantir le profil pilote.
+            // Pour la première fois, on vérifie l'état initial
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                 loadingOverlay.classList.add('hidden');
+                 authContainer.classList.remove('hidden');
+                 authContainer.innerHTML = renderAuthPage();
+                 attachAuthListeners();
+            }
         }
 
-        // Rendre la fonction accessible globalement pour les onclicks dans le HTML
         window.changeView = changeView; 
-        
-        // Démarrer l'application au chargement complet de la page
         window.onload = initializeSupabase;
         
     </script>

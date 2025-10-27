@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'; // CORRIGÉ : Utilisation de l'import CDN
 import { ArrowLeft, ArrowRight, LogIn, LogOut, User, DollarSign, Calendar, Settings, Send, Plus, Trash2, Edit } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -50,9 +50,88 @@ const loadDemoData = () => {
 
 const saveDemoData = (store) => {
     localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(store));
+    // Déclenche un événement pour que le hook useDataService puisse se mettre à jour
+    window.dispatchEvent(new Event('demoDataUpdated')); 
 };
 
-// --- SERVICES DE DONNÉES (CRUD & TEMPS RÉEL) ---
+// --- FONCTIONS SUPABASE/DEMO POUR LE TEMPS RÉEL ET CRUD ---
+
+// Écoute en temps réel d'une table Supabase ou charge les données de démo
+const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
+    
+    // --- MODE DÉMO ---
+    if (!isSupabaseConfigured) {
+        // Fonction pour mettre à jour l'état à partir du store de démo
+        const updateStateFromDemo = () => {
+            const demoData = loadDemoData();
+            // Utilise 'co_owners' pour l'état 'pilots'
+            const data = demoData[tableName] || demoData.co_owners || []; 
+            setState(data);
+        };
+        
+        updateStateFromDemo(); // Chargement initial
+
+        // Écouteur d'événement global pour les mises à jour en mode démo
+        const listener = () => updateStateFromDemo();
+        window.addEventListener('demoDataUpdated', listener);
+        
+        return () => window.removeEventListener('demoDataUpdated', listener);
+    }
+    
+    // --- MODE SUPABASE ---
+    
+    const fetchData = async () => {
+        const { data, error } = await supabase.from(tableName).select('*');
+        if (error) {
+            console.error(`Erreur de chargement de ${tableName}:`, error);
+        } else {
+            setState(data);
+        }
+    };
+    
+    fetchData(); // Chargement initial
+
+    // Écouteur temps réel Supabase
+    const channel = supabase
+        .channel(`public:${tableName}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, () => {
+            fetchData();
+        })
+        .subscribe();
+        
+    return () => {
+        supabase.removeChannel(channel);
+    };
+};
+
+// Récupère une seule entrée (pour l'ULM)
+const fetchSingleRecord = async (tableName, recordId, setState) => {
+    
+    // --- MODE DÉMO ---
+    if (!isSupabaseConfigured) {
+        const demoData = loadDemoData();
+        if (tableName === 'aircraft') {
+            setState(demoData.aircraft);
+        }
+        return;
+    }
+    
+    // --- MODE SUPABASE ---
+    const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .eq('id', recordId)
+        .single();
+        
+    if (error && error.code !== 'PGRST116') { // PGRST116 = pas de ligne trouvée
+        console.error(`Erreur de chargement d'enregistrement unique ${tableName} (${recordId}):`, error);
+    } else if (data) {
+        setState(data);
+    }
+};
+
+
+// --- HOOK PRINCIPAL : useDataService ---
 
 const useDataService = () => {
     const [dataState, setDataState] = useState({
@@ -142,9 +221,12 @@ const useDataService = () => {
         if (isDemo) {
             // Mode Démo: Simuler l'insertion locale
             let store = loadDemoData();
+            // Assure que la bonne clé est utilisée pour les collections de démo
+            const storeKey = tableName === 'pilots' ? 'co_owners' : tableName; 
+            
             record.id = uuidv4();
             record.created_at = new Date().toISOString();
-            store[tableName].push(record);
+            store[storeKey].push(record);
             saveDemoData(store);
             return { data: record, error: null };
         }
@@ -157,14 +239,16 @@ const useDataService = () => {
         if (isDemo) {
             // Mode Démo: Simuler la mise à jour locale
             let store = loadDemoData();
-            const index = store[tableName].findIndex(r => r[primaryKeyField] === record[primaryKeyField]);
+            const storeKey = tableName === 'pilots' ? 'co_owners' : tableName;
+
+            const index = store[storeKey].findIndex(r => r[primaryKeyField] === record[primaryKeyField]);
             if (index > -1) {
-                store[tableName][index] = { ...store[tableName][index], ...record };
+                store[storeKey][index] = { ...store[storeKey][index], ...record };
             } else {
                 // Si ce n'est pas une mise à jour, on insère
                 record.id = uuidv4();
                 record.created_at = new Date().toISOString();
-                store[tableName].push(record);
+                store[storeKey].push(record);
             }
             saveDemoData(store);
             return { data: record, error: null };
@@ -177,28 +261,16 @@ const useDataService = () => {
     // --- Temps Réel / Chargement de Données ---
 
     useEffect(() => {
-        const primaryKeyMap = {
-            co_owners: 'uid',
-            aircraft: 'id',
-            expense_categories: 'id',
-        };
-
-        const loadAndSubscribe = (tableName, setStateKey) => {
-            const primaryKey = primaryKeyMap[tableName] || 'id';
-            return subscribeToTable(tableName, (data) => {
-                setDataState(prev => ({ ...prev, [setStateKey]: data }));
-            }, primaryKey);
-        };
-
-        let subscriptions = [];
         const tablesToLoad = [
             { name: 'aircraft', stateKey: 'aircraft', single: true },
-            { name: 'co_owners', stateKey: 'pilots' },
+            { name: 'co_owners', stateKey: 'pilots' }, // Supabase table: co_owners, React state: pilots
             { name: 'reservations', stateKey: 'reservations' },
             { name: 'flight_logs', stateKey: 'flightLogs' },
             { name: 'expenses', stateKey: 'expenses' },
             { name: 'expense_categories', stateKey: 'expenseCategories' }
         ];
+
+        let subscriptions = [];
 
         if (isDemo) {
             // Chargement initial pour le mode démo
@@ -213,12 +285,31 @@ const useDataService = () => {
                 expenseCategories: demoData.expense_categories,
                 dataLoading: false,
             }));
+            
+            // Écouteur global pour que la démo se mette à jour après une sauvegarde
+            const listener = () => {
+                const updatedDemoData = loadDemoData();
+                setDataState(prev => ({
+                    ...prev,
+                    aircraft: updatedDemoData.aircraft,
+                    pilots: updatedDemoData.co_owners,
+                    reservations: updatedDemoData.reservations,
+                    flightLogs: updatedDemoData.flight_logs,
+                    expenses: updatedDemoData.expenses,
+                    expenseCategories: updatedDemoData.expense_categories,
+                }));
+            };
+            window.addEventListener('demoDataUpdated', listener);
+            return () => window.removeEventListener('demoDataUpdated', listener);
+
         } else if (isSupabaseConfigured) {
             setDataState(prev => ({ ...prev, dataLoading: true }));
             
             tablesToLoad.forEach(table => {
                 if (!table.single) {
-                    subscriptions.push(loadAndSubscribe(table.name, table.stateKey));
+                    subscriptions.push(subscribeToTable(table.name, (data) => {
+                        setDataState(prev => ({ ...prev, [table.stateKey]: data }));
+                    }));
                 } else {
                     fetchSingleRecord(table.name, AIRCRAFT_ID, (data) => {
                          setDataState(prev => ({ ...prev, [table.stateKey]: data }));
@@ -237,7 +328,8 @@ const useDataService = () => {
     // L'Admin est le premier pilote ou celui qui a le flag dans la DB
     const isAdmin = useMemo(() => {
         if (!profile) return false;
-        return profile.is_admin || dataState.pilots.length === 0; // Le premier utilisateur peut être admin par défaut
+        // Le premier utilisateur inscrit est désigné comme admin
+        return profile.is_admin || (dataState.pilots.length === 1 && dataState.pilots[0].uid === profile.uid); 
     }, [profile, dataState.pilots]);
 
 
@@ -276,6 +368,12 @@ const LoginPage = ({ setView }) => {
         e.preventDefault();
         setLoading(true);
         setMessage('');
+        
+        if (!isSupabaseConfigured) {
+            setMessage("Erreur: Le mode démo ne supporte pas la connexion par email. Veuillez configurer Supabase.");
+            setLoading(false);
+            return;
+        }
 
         if (isSignUp) {
             const { error } = await supabase.auth.signUp({ email, password });
@@ -666,19 +764,13 @@ const ReserveView = ({ user, pilots, reservations, insertRecord, setView }) => {
 // VUE : LOGUER VOL
 // ------------------------------------
 
-const LogFlightView = ({ aircraft, flightLogs, pilots, insertRecord, setView }) => {
+const LogFlightView = ({ aircraft, flightLogs, pilots, insertRecord, upsertRecord, user, setView }) => {
     const [logData, setLogData] = useState({
         date: new Date().toISOString().substring(0, 10),
-        end_tach_hours: aircraft.latest_tach_hour,
         duration_hours: '',
         fuel_cost_total: '',
     });
     const [message, setMessage] = useState('');
-
-    useEffect(() => {
-        // Met à jour l'heure tachymétrique de fin par défaut quand l'ULM change
-        setLogData(prev => ({ ...prev, end_tach_hours: aircraft.latest_tach_hour }));
-    }, [aircraft.latest_tach_hour]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -688,36 +780,37 @@ const LogFlightView = ({ aircraft, flightLogs, pilots, insertRecord, setView }) 
         const fuelCost = parseFloat(logData.fuel_cost_total);
         const currentTach = parseFloat(aircraft.latest_tach_hour);
 
-        if (isNaN(duration) || duration <= 0 || isNaN(fuelCost) || duration === '' || fuelCost === '') {
-            setMessage("Veuillez entrer des valeurs numériques valides pour la durée et le coût du carburant.");
+        if (isNaN(duration) || duration <= 0 || isNaN(fuelCost) || logData.duration_hours === '' || logData.fuel_cost_total === '') {
+            setMessage("Veuillez entrer des valeurs numériques valides et positives pour la durée et le coût du carburant.");
             return;
         }
 
-        const pilotProfile = pilots.find(p => p.uid === supabase?.auth.user()?.id);
+        const pilotProfile = pilots.find(p => p.uid === user.id); // Utiliser user.id au lieu de supabase?.auth.user()?.id
+        if (!pilotProfile) {
+            setMessage("Erreur: Profil pilote non trouvé. Veuillez vous reconnecter.");
+            return;
+        }
+
+        const newEndTach = currentTach + duration;
 
         const newLog = {
             date: logData.date,
-            user_id: pilotProfile?.uid || 'anonymous',
-            pilot_name: pilotProfile?.name || 'Inconnu',
+            user_id: pilotProfile.uid,
+            pilot_name: pilotProfile.name || user.email,
             duration_hours: duration,
-            end_tach_hours: currentTach + duration, // Nouvelle heure tachymétrique
+            end_tach_hours: newEndTach, // Nouvelle heure tachymétrique
             fuel_cost_total: fuelCost,
         };
 
         // 1. Enregistre le nouveau vol
         const { error: logError } = await insertRecord('flight_logs', newLog);
 
-        // 2. Met à jour l'heure tachymétrique de l'ULM
+        // 2. Met à jour l'heure tachymétrique de l'ULM et enregistre le coût
         if (!logError) {
             const { error: aircraftUpdateError } = await upsertRecord('aircraft', {
                 id: AIRCRAFT_ID,
-                latest_tach_hour: newLog.end_tach_hours,
+                latest_tach_hour: newEndTach,
             }, 'id');
-
-            if (aircraftUpdateError) {
-                setMessage(`Vol logué, mais erreur de mise à jour de l'ULM: ${aircraftUpdateError.message}`);
-                return;
-            }
 
             // 3. Enregistre le coût du carburant comme une dépense variable
             const { error: expenseError } = await insertRecord('expenses', {
@@ -725,18 +818,20 @@ const LogFlightView = ({ aircraft, flightLogs, pilots, insertRecord, setView }) 
                 cost: fuelCost,
                 type: 'carburant', // Nouvelle catégorie implicite
                 description: `Carburant pour vol de ${duration.toFixed(1)}h`,
-                user_id: pilotProfile?.uid || 'anonymous',
+                user_id: pilotProfile.uid,
             });
-            
-            if (expenseError) {
-                setMessage(`Vol logué et ULM mis à jour, mais erreur d'enregistrement du carburant: ${expenseError.message}`);
-                return;
-            }
 
-            setMessage(`Vol de ${duration.toFixed(1)}h logué avec succès ! Nouvelle heure Tachymètre: ${newLog.end_tach_hours.toFixed(1)} h`);
+            if (aircraftUpdateError || expenseError) {
+                // Log l'erreur mais considère l'opération principale (le log de vol) comme réussie pour l'utilisateur
+                setMessage(`Vol logué avec succès, mais une erreur est survenue lors de la mise à jour des coûts/ULM.`);
+                console.error("Erreur de mise à jour secondaire:", aircraftUpdateError, expenseError);
+            } else {
+                setMessage(`Vol de ${duration.toFixed(1)}h logué avec succès ! Nouvelle heure Tachymètre: ${newEndTach.toFixed(1)} h`);
+            }
+            
+            // Réinitialiser le formulaire
             setLogData({
                 date: new Date().toISOString().substring(0, 10),
-                end_tach_hours: newLog.end_tach_hours,
                 duration_hours: '',
                 fuel_cost_total: '',
             });
@@ -813,7 +908,7 @@ const LogFlightView = ({ aircraft, flightLogs, pilots, insertRecord, setView }) 
 // VUE : COMPTABILITÉ
 // ------------------------------------
 
-const CostsView = ({ aircraft, flightLogs, expenses, expenseCategories, insertRecord }) => {
+const CostsView = ({ aircraft, flightLogs, expenses, expenseCategories, insertRecord, user }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newExpense, setNewExpense] = useState({ cost: '', type: 'fees', description: '', date: new Date().toISOString().substring(0, 10) });
     const [message, setMessage] = useState('');
@@ -849,7 +944,7 @@ const CostsView = ({ aircraft, flightLogs, expenses, expenseCategories, insertRe
         const expenseToSave = {
             ...newExpense,
             cost: cost,
-            user_id: supabase?.auth.user()?.id || 'anonymous',
+            user_id: user.id, // Utilisation de user.id
         };
 
         const { error } = await insertRecord('expenses', expenseToSave);
@@ -983,7 +1078,7 @@ const CostItem = ({ label, value }) => (
 // VUE : ADMINISTRATION
 // ------------------------------------
 
-const AdminView = ({ aircraft, pilots, expenseCategories, upsertRecord, user, isAdmin }) => {
+const AdminView = ({ aircraft, pilots, expenseCategories, upsertRecord, user, isAdmin, insertRecord }) => {
     const [aircraftName, setAircraftName] = useState(aircraft.name);
     const [fixedCost, setFixedCost] = useState(aircraft.fixed_cost_annual);
     const [message, setMessage] = useState('');

@@ -3,503 +3,808 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ULM G70 Manager</title>
-    <!-- Chargement de Tailwind CSS pour le style -->
+    <title>ULM Manager - Gestion Aéronautique</title>
+    <!-- Chargement de Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Définir une police par défaut */
-        body { font-family: 'Inter', sans-serif; }
+        /* Configuration de la police Inter */
+        html { font-family: 'Inter', sans-serif; }
+        /* Style général du corps */
+        body { background-color: #f7f9fc; }
+        /* Masquer le menu sur les petits écrans par défaut */
+        #nav-menu {
+            transition: transform 0.3s ease-in-out;
+        }
+        @media (max-width: 767px) {
+            #nav-menu.hidden-mobile {
+                transform: translateX(-100%);
+            }
+            #nav-menu.show-mobile {
+                transform: translateX(0);
+                z-index: 50;
+            }
+        }
     </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-blue': '#1e3a8a', /* Dark Blue */
+                        'secondary-yellow': '#facc15', /* Amber */
+                        'bg-light': '#f7f9fc',
+                        'card-bg': '#ffffff',
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body>
-    <!-- Le conteneur où React va monter l'application -->
-    <div id="root"></div>
+<body class="min-h-screen flex flex-col">
 
-    <!-- Chargement de React et ReactDOM via CDN -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <!-- Chargement de Babel pour compiler le JSX directement dans le navigateur -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- NOUVEAU: Chargement du client Supabase (Version UMD globale) -->
-    <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase-js.min.js"></script>
+    <!-- Chargement des modules Firebase -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <!-- Code de l'application ULM_Manager.jsx (maintenant intégré) -->
-    <script type="text/babel">
-        // NOTE: Les imports ont été supprimés pour la compatibilité Babel Standalone.
-        // Nous utilisons les variables globales React et window.supabase.
+        // Global state and utility functions
+        window.app = null;
+        window.db = null;
+        window.auth = null;
+        window.userId = null;
+        window.currentView = 'dashboard';
 
-        // Destructuration globale pour la clarté (remplace les imports de React)
-        const { useState, useEffect, useCallback, useMemo } = React;
-        // Fix: Accès direct à la fonction createClient exposée globalement par le CDN Supabase
-        const createClient = window.supabase.createClient;
+        // Data holders
+        window.flights = [];
+        window.reservations = [];
+        window.accounts = { totalHours: 0, fuelBalance: 0, cashBalance: 0 };
+        window.ulmList = []; // Liste des ULM disponibles
 
-        // Configuration Supabase
-        const supabaseUrl = typeof VITE_SUPABASE_URL !== 'undefined' ? VITE_SUPABASE_URL : null;
-        const supabaseAnonKey = typeof VITE_SUPABASE_ANON_KEY !== 'undefined' ? VITE_SUPABASE_ANON_KEY : null;
+        // Helper: Formatage de l'argent
+        window.formatCurrency = (amount) => {
+            return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount);
+        };
 
-        // Initialisation du client Supabase
-        const supabaseClient = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
+        // Helper: Formatage des heures
+        window.formatHours = (minutes) => {
+            if (typeof minutes !== 'number' || isNaN(minutes)) return '0h00';
+            const h = Math.floor(minutes / 60);
+            const m = minutes % 60;
+            return `${h}h${m.toString().padStart(2, '0')}`;
+        };
 
-        // Identifiant d'application par défaut pour les tables publiques
-        const AIRCRAFT_ID = 'G70'; // ID fixe pour l'ULM unique
-        const DEMO_STORAGE_KEY = 'ulm_manager_demo_data';
-
-        // --- INITIALISATION DU MODE DÉMO PERSISTANT (LOCAL STORAGE) ---
-        const getInitialDemoData = () => ({
-            aircraft: { id: AIRCRAFT_ID, name: 'ULM G70 (Demo)', fixed_cost_annual: 4500.0, latest_tach_hour: 0.0 },
-            co_owners: [],
-            reservations: [],
-            flight_logs: [],
-            expenses: [],
-            expense_categories: [
-                { id: 'cat1', value: 'maintenance', label: 'Maintenance (Prévue)' },
-                { id: 'cat2', value: 'fees', label: 'Frais Aérodrome' },
-                { id: 'cat3', value: 'other', label: 'Autre' }
-            ]
-        });
-
-        let demoDataStore = getInitialDemoData();
-
-        const loadDemoData = () => {
-            const stored = localStorage.getItem(DEMO_STORAGE_KEY);
-            if (stored) {
-                demoDataStore = JSON.parse(stored);
-            } else {
-                demoDataStore = getInitialDemoData();
-                localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoDataStore));
+        // Helper: Conversion 'HhMM' string vers minutes
+        window.hhmmsToMinutes = (hhmms) => {
+            if (!hhmms) return 0;
+            const match = hhmms.match(/^(\d+)h(\d{2})$/);
+            if (match) {
+                const hours = parseInt(match[1], 10);
+                const minutes = parseInt(match[2], 10);
+                return (hours * 60) + minutes;
             }
-            return demoDataStore;
+            return 0;
         };
 
-        const saveDemoData = (store) => {
-            demoDataStore = store;
-            localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoDataStore));
-            window.dispatchEvent(new Event('demoDataUpdated'));
-        };
+        // --- FIREBASE INITIALIZATION AND AUTHENTICATION ---
 
-        // --- CONSTANTES ET FONCTIONS UTILITAIRES ---
+        const initializeFirebase = async () => {
+            try {
+                // IMPORTANT: Use the global variables provided by the canvas environment
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
 
-        const PrimaryButtonStyle = "w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition duration-200 ease-in-out";
-        const SecondaryButtonStyle = "w-full py-2 px-4 bg-white text-indigo-600 border border-indigo-200 font-semibold rounded-xl shadow-md hover:bg-gray-50 transition duration-200 ease-in-out";
-        const MobileInputStyle = "w-full p-4 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 text-lg";
-        const CardStyle = "bg-white p-6 rounded-2xl shadow-xl";
-
-        // --- FONCTIONS SUPABASE/DEMO POUR LE TEMPS RÉEL ET CRUD ---
-
-        const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
-            if (!supabaseClient) {
-                // --- MODE DÉMO ---
-                const demoData = demoDataStore[tableName];
-                if (tableName === 'aircraft') {
-                    setState(demoData);
-                } else {
-                    setState(demoData.map(item => ({ ...item, id: item[primaryKey] })));
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config is missing. Data persistence will not work.");
+                    // Fallback to in-memory state if config is missing (for local testing)
+                    window.renderApp();
+                    return;
                 }
-                
-                const listener = () => {
-                    const updatedDemoData = demoDataStore[tableName];
-                    if (tableName === 'aircraft') {
-                        setState(updatedDemoData);
+
+                // Initialize App and Services
+                window.app = initializeApp(firebaseConfig);
+                window.db = getFirestore(window.app);
+                window.auth = getAuth(window.app);
+
+                // Set Firestore log level for debugging
+                setLogLevel('debug');
+
+                // Authentication
+                onAuthStateChanged(window.auth, async (user) => {
+                    if (user) {
+                        window.userId = user.uid;
                     } else {
-                        setState(updatedDemoData.map(item => ({ ...item, id: item[primaryKey] })));
+                        // Sign in with custom token if available, otherwise anonymously
+                        if (typeof __initial_auth_token !== 'undefined') {
+                            await signInWithCustomToken(window.auth, __initial_auth_token);
+                            window.userId = window.auth.currentUser.uid;
+                        } else {
+                            await signInAnonymously(window.auth);
+                            window.userId = window.auth.currentUser.uid;
+                        }
                     }
-                };
-                window.addEventListener('demoDataUpdated', listener);
-                return () => window.removeEventListener('demoDataUpdated', listener);
-            }
 
-            // --- MODE SUPABASE ---
-            const fetchInitialData = async () => {
-                const { data, error } = await supabaseClient
-                    .from(tableName)
-                    .select('*');
-
-                if (error) {
-                    console.error(`Erreur de chargement initial pour ${tableName}:`, error);
-                } else {
-                    setState(data.map(item => ({ ...item, id: item[primaryKey] })));
-                }
-            };
-
-            fetchInitialData();
-
-            const subscription = supabaseClient
-                .channel(tableName)
-                .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
-                    fetchInitialData();
-                })
-                .subscribe();
-
-            return () => {
-                supabaseClient.removeChannel(subscription);
-            };
-        };
-
-        const upsertRecord = async (tableName, recordData, primaryKeyField = 'id') => {
-            if (!supabaseClient) {
-                // --- MODE DÉMO PERSISTANT ---
-                let store = { ...demoDataStore };
-                const key = tableName;
-                
-                if (key === 'aircraft') {
-                    store.aircraft = { ...store.aircraft, ...recordData };
-                } else {
-                    const index = store[key].findIndex(r => r[primaryKeyField] === recordData[primaryKeyField]);
-                    if (index > -1) {
-                        store[key][index] = { ...store[key][index], ...recordData }; // Update
-                    } else {
-                        store[key].push({ ...recordData, [primaryKeyField]: Math.random().toString(36).substring(2, 9) }); // Insert
+                    // Once authenticated, start listening for data
+                    if (window.userId) {
+                        console.log("Authenticated with userId:", window.userId);
+                        document.getElementById('user-id-display').textContent = 'ID Utilisateur: ' + window.userId;
+                        startDataListeners();
+                        window.renderApp(); // Initial render after auth
                     }
-                }
-                saveDemoData(store);
-                return { data: { ...recordData }, error: null };
-            }
-
-            // --- MODE SUPABASE ---
-            const { data, error } = await supabaseClient
-                .from(tableName)
-                .upsert(recordData)
-                .select()
-                .single();
-            
-            if (error) {
-                console.error(`Erreur d'UPSERT dans ${tableName}:`, error);
-            }
-            return { data, error };
-        };
-
-        const insertRecord = async (tableName, recordData) => {
-            if (!supabaseClient) {
-                // --- MODE DÉMO PERSISTANT ---
-                let store = { ...demoDataStore };
-                const key = tableName;
-                
-                store[key].push({ ...recordData, id: Math.random().toString(36).substring(2, 9) }); // Insert
-                saveDemoData(store);
-                return { data: { ...recordData }, error: null };
-            }
-
-            // --- MODE SUPABASE ---
-            const { data, error } = await supabaseClient
-                .from(tableName)
-                .insert(recordData)
-                .select()
-                .single();
-
-            if (error) {
-                console.error(`Erreur d'INSERT dans ${tableName}:`, error);
-            }
-            return { data, error };
-        };
-
-        // --- COMPOSANT DE CONNEXION (LOGIN PAGE) ---
-
-        const LoginPage = ({ setSession }) => {
-            const [email, setEmail] = useState('');
-            const [password, setPassword] = useState('');
-            const [name, setName] = useState('');
-            const [isSignUp, setIsSignUp] = useState(false);
-            const [loading, setLoading] = useState(false);
-            const [message, setMessage] = useState('');
-
-            const handleAuth = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                setMessage('');
-
-                if (!supabaseClient) {
-                    setMessage("Erreur: Le client Supabase n'est pas configuré. Veuillez vérifier les variables d'environnement.");
-                    setLoading(false);
-                    return;
-                }
-
-                let authResponse;
-                
-                if (isSignUp) {
-                    authResponse = await supabaseClient.auth.signUp({ email, password, options: { data: { name } } });
-                } else {
-                    authResponse = await supabaseClient.auth.signInWithPassword({ email, password });
-                }
-
-                setLoading(false);
-
-                if (authResponse.error) {
-                    setMessage(`Erreur d'authentification: ${authResponse.error.message}`);
-                    return;
-                }
-
-                if (isSignUp && !authResponse.data.session) {
-                    setMessage("Inscription réussie ! Veuillez vérifier votre e-mail pour le lien de confirmation.");
-                    setEmail('');
-                    setPassword('');
-                    setName('');
-                } else if (authResponse.data.session) {
-                    setSession(authResponse.data.session);
-                }
-            };
-
-            return (
-                <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-                    <div className={`${CardStyle} w-full max-w-md`}>
-                        <h1 className="text-3xl font-bold text-center text-indigo-600 mb-6">
-                            {isSignUp ? 'Créer un Compte Pilote' : 'Connexion ULM Manager'}
-                        </h1>
-                        <p className="text-sm text-center text-gray-500 mb-6">
-                            {isSignUp ? "L'administrateur doit vous ajouter en tant que co-propriétaire après l'inscription." : "Connectez-vous pour accéder au planning et aux logs."}
-                        </p>
-
-                        <form onSubmit={handleAuth} className="space-y-4">
-                            {isSignUp && (
-                                <input
-                                    type="text"
-                                    placeholder="Votre Nom Complet"
-                                    className={MobileInputStyle}
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    required
-                                />
-                            )}
-                            <input
-                                type="email"
-                                placeholder="Adresse E-mail"
-                                className={MobileInputStyle}
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                required
-                            />
-                            <input
-                                type="password"
-                                placeholder="Mot de Passe"
-                                className={MobileInputStyle}
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                            />
-                            <button type="submit" disabled={loading} className={PrimaryButtonStyle}>
-                                {loading ? 'Chargement...' : (isSignUp ? 'S\'inscrire' : 'Se Connecter')}
-                            </button>
-                        </form>
-
-                        {message && (
-                            <div className={`mt-4 p-3 rounded-xl text-center text-sm ${message.includes('Erreur') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                                {message}
-                            </div>
-                        )}
-
-                        <button
-                            onClick={() => setIsSignUp(!isSignUp)}
-                            className="mt-6 w-full text-indigo-600 text-sm hover:underline"
-                            disabled={loading}
-                        >
-                            {isSignUp ? 'J\'ai déjà un compte (Se connecter)' : 'Pas encore inscrit ? (Créer un compte)'}
-                        </button>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- VUES PRINCIPALES (Dashboard, Reserve, LogFlight, Costs, Admin) ---
-
-        // Dashboard & Planning View (Simplifiée pour l'exemple)
-        const DashboardView = ({ user, isAdmin, aircraft, reservations, flights, expenses, pilots }) => {
-            const totalFlightHours = flights.reduce((sum, flight) => sum + flight.duration_hours, 0);
-            const fixedCosts = aircraft?.fixed_cost_annual || 0;
-            const variableCosts = expenses.reduce((sum, exp) => sum + exp.cost, 0);
-
-            const realHourlyCost = useMemo(() => {
-                if (totalFlightHours === 0) return fixedCosts + variableCosts;
-                return (fixedCosts + variableCosts) / totalFlightHours;
-            }, [totalFlightHours, fixedCosts, variableCosts]);
-
-            return (
-                <div className="space-y-6">
-                    <h2 className="text-3xl font-bold text-gray-800 border-b pb-2">Tableau de Bord</h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className={`${CardStyle} bg-indigo-50 border-indigo-200 border`}>
-                            <p className="text-sm font-medium text-indigo-600">Coût Horaire Réel Estimé</p>
-                            <p className="text-3xl font-extrabold text-indigo-800 mt-1">{realHourlyCost.toFixed(2)} €</p>
-                            <p className="text-xs text-gray-500 mt-2">Basé sur {totalFlightHours.toFixed(1)} heures enregistrées.</p>
-                        </div>
-                        
-                        <div className={`${CardStyle}`}>
-                            <p className="text-sm font-medium text-gray-600">Heures Tachymétriques (Dernier Log)</p>
-                            <p className="text-3xl font-extrabold text-gray-800 mt-1">{aircraft?.latest_tach_hour?.toFixed(1) || '0.0'} h</p>
-                            <p className="text-xs text-gray-500 mt-2">Heures totales de l'ULM.</p>
-                        </div>
-
-                        <div className={`${CardStyle}`}>
-                            <p className="text-sm font-medium text-gray-600">Coût total des dépenses</p>
-                            <p className="text-3xl font-extrabold text-gray-800 mt-1">{variableCosts.toFixed(2)} €</p>
-                            <p className="text-xs text-gray-500 mt-2">Dépenses variables (maintenance, frais) enregistrées.</p>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- COMPOSANT PRINCIPAL DE L'APPLICATION ---
-        const App = () => {
-            // Initialisation du mode démo
-            useEffect(() => {
-                if (!supabaseClient) {
-                    loadDemoData();
-                }
-            }, []);
-            
-            // États d'Authentification
-            const [session, setSession] = useState(null);
-            const [authLoading, setAuthLoading] = useState(true);
-
-            // États des Données
-            const [view, setView] = useState('dashboard'); // 'dashboard', 'reserve', 'log', 'costs', 'admin'
-            const [pilots, setPilots] = useState([]);
-            const [aircraft, setAircraft] = useState({});
-            const [reservations, setReservations] = useState([]);
-            const [flights, setFlights] = useState([]);
-            const [expenses, setExpenses] = useState([]);
-            const [expenseCategories, setExpenseCategories] = useState([]);
-
-            const userId = session?.user?.id;
-            const userProfile = pilots.find(p => p.uid === userId); // Utilise uid comme clé primaire pour Supabase Auth
-            const isAdmin = userProfile?.is_admin || false;
-            
-            // --- LOGIQUE D'AUTHENTIFICATION SUPABASE ---
-            useEffect(() => {
-                if (!supabaseClient) {
-                    setAuthLoading(false); 
-                    return;
-                }
-
-                // Initialiser la session et écouter les changements
-                const { data: authListener } = supabaseClient.auth.onAuthStateChange(
-                    (event, currentSession) => {
-                        setSession(currentSession);
-                        setAuthLoading(false);
-                    }
-                );
-
-                supabaseClient.auth.getSession().then(({ data: { session: initialSession } }) => {
-                    setSession(initialSession);
-                    setAuthLoading(false);
                 });
 
-                return () => {
-                    authListener.subscription.unsubscribe();
-                };
-            }, []);
-
-
-            // --- LOGIQUE DE CHARGEMENT DES DONNÉES EN TEMPS RÉEL ---
-            useEffect(() => {
-                // Charger les données si l'utilisateur est connecté OU si nous sommes en mode démo
-                if (!supabaseClient || userId) { 
-                    const unsubPilots = subscribeToTable('co_owners', setPilots, 'uid');
-                    const unsubAircraft = subscribeToTable('aircraft', setAircraft, 'id');
-                    const unsubReservations = subscribeToTable('reservations', setReservations);
-                    const unsubFlights = subscribeToTable('flight_logs', setFlights);
-                    const unsubExpenses = subscribeToTable('expenses', setExpenses);
-                    const unsubCategories = subscribeToTable('expense_categories', setExpenseCategories);
-                    
-                    return () => {
-                        unsubPilots();
-                        unsubAircraft();
-                        unsubReservations();
-                        unsubFlights();
-                        unsubExpenses();
-                        unsubCategories();
-                    };
-                }
-            }, [userId, supabaseClient]);
-
-            // --- RENDU BASÉ SUR L'AUTHENTIFICATION ET LE MODE DÉMO ---
-
-            if (!supabaseClient) {
-                // RENDU MODE DÉMO PERSISTANT LOCAL (Pas besoin de se loguer)
-                return (
-                    <div className="font-sans min-h-screen bg-gray-50 flex flex-col">
-                        <Header setView={setView} currentView={view} isAdmin={true} setSession={setSession} />
-                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-                            <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded-xl mb-6 shadow-md">
-                                <p className="font-bold">Mode Démo Local Actif.</p>
-                                <p className="text-sm">Vos données sont sauvegardées dans le navigateur. Connectez-vous à Supabase pour partager les données.</p>
-                            </div>
-                            {view === 'dashboard' && <DashboardView user={{name: "Admin Démo"}} isAdmin={true} aircraft={aircraft} reservations={reservations} flights={flights} expenses={expenses} pilots={pilots} />}
-                            {/* Les autres vues seront ici dans le fichier complet */}
-                            <p className="mt-8 text-center text-gray-500">Pour voir les autres vues (Réserver, Loguer Vol, etc.), remplacez 'dashboard' par la vue souhaitée dans l'état `view`.</p>
-                        </div>
-                    </div>
-                );
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                window.renderMessage("Erreur d'initialisation", "Impossible de se connecter à la base de données. Veuillez vérifier la console pour plus de détails.", "bg-red-500");
             }
-            
-            if (authLoading) {
-                return <div className="min-h-screen flex items-center justify-center text-xl text-indigo-600">Vérification de la session...</div>;
-            }
-
-            if (!session) {
-                // RENDU PAGE DE CONNEXION (Authentification par e-mail)
-                return <LoginPage setSession={setSession} />;
-            }
-
-            // RENDU APPLICATION PRINCIPALE (Utilisateur connecté)
-            return (
-                <div className="font-sans min-h-screen bg-gray-50 flex flex-col">
-                    <Header setView={setView} currentView={view} isAdmin={isAdmin} setSession={setSession} />
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-                        {view === 'dashboard' && <DashboardView user={userProfile} isAdmin={isAdmin} aircraft={aircraft} reservations={reservations} flights={flights} expenses={expenses} pilots={pilots} />}
-                         {/* Les autres vues seront ici dans le fichier complet */}
-                        <p className="mt-8 text-center text-gray-500">Actuellement connecté. Les autres vues (Réserver, Loguer Vol, etc.) sont fonctionnelles.</p>
-                    </div>
-                </div>
-            );
         };
 
-        // Composant Header (Barre de navigation)
-        const Header = ({ setView, currentView, isAdmin, setSession }) => {
-            const handleLogout = async () => {
-                if (supabaseClient) {
-                    await supabaseClient.auth.signOut();
-                    setSession(null);
-                } else {
-                    // En mode démo, on simule la déconnexion en réinitialisant le localStorage
-                    localStorage.removeItem(DEMO_STORAGE_KEY);
-                    window.location.reload(); 
+        // --- DATA LISTENERS (Firestore) ---
+
+        const startDataListeners = () => {
+            if (!window.db || !window.userId) return;
+
+            // 1. Liste des ULM (Public/Shared data)
+            const ulmColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "ulmList");
+            onSnapshot(ulmColRef, (snapshot) => {
+                window.ulmList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // If the list is empty, initialize with default values (e.g., for first run)
+                if (window.ulmList.length === 0) {
+                    initializeUlmList();
                 }
+                window.renderApp();
+            }, (error) => {
+                console.error("Error listening to ULM list:", error);
+            });
+
+            // 2. Réservations (Public/Shared data)
+            const reservationsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "reservations");
+            onSnapshot(reservationsColRef, (snapshot) => {
+                window.reservations = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data(),
+                    date: doc.data().date ? doc.data().date.toDate() : null // Convert Firestore Timestamp to Date
+                })).sort((a, b) => (a.date < b.date ? -1 : 1));
+                window.renderApp();
+            }, (error) => {
+                console.error("Error listening to reservations:", error);
+            });
+
+            // 3. Vols (Private user data)
+            const flightsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "flights");
+            onSnapshot(flightsColRef, (snapshot) => {
+                window.flights = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data(),
+                    date: doc.data().date ? doc.data().date.toDate() : null // Convert Firestore Timestamp to Date
+                })).sort((a, b) => (a.date < b.date ? 1 : -1)); // Sort by date descending (most recent first)
+                updateAccounts();
+                window.renderApp();
+            }, (error) => {
+                console.error("Error listening to flights:", error);
+            });
+
+            // 4. Comptes (Private user data, stored as a single document)
+            const accountDocRef = doc(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "accounts", "userBalance");
+            onSnapshot(accountDocRef, (docSnapshot) => {
+                if (docSnapshot.exists()) {
+                    window.accounts = docSnapshot.data();
+                } else {
+                    // Initialize if not exists
+                    window.accounts = { totalHours: 0, fuelBalance: 0, cashBalance: 0 };
+                    setDoc(accountDocRef, window.accounts);
+                }
+                window.renderApp();
+            }, (error) => {
+                console.error("Error listening to accounts:", error);
+            });
+        };
+
+        // Initialize ULM list if empty (for new users/environments)
+        const initializeUlmList = async () => {
+            const ulmColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "ulmList");
+            const defaultUlms = [
+                { registration: 'F-JOLI', model: 'Sky Ranger', hourRate: 95, fuelConsumption: 12, maxFuel: 70 },
+                { registration: 'F-COOL', model: 'Savage Cub', hourRate: 110, fuelConsumption: 15, maxFuel: 80 },
+                { registration: 'F-ZEN', model: 'Nynja', hourRate: 100, fuelConsumption: 10, maxFuel: 60 },
+            ];
+            for (const ulm of defaultUlms) {
+                await addDoc(ulmColRef, ulm);
+            }
+        };
+
+        // --- ACCOUNTING LOGIC ---
+        const updateAccounts = () => {
+            let totalFlightTimeMinutes = 0;
+            let fuelConsumedLiters = 0;
+            let cashEarned = 0;
+
+            window.flights.forEach(flight => {
+                const durationMinutes = window.hhmmsToMinutes(flight.duration);
+                totalFlightTimeMinutes += durationMinutes;
+
+                const ulm = window.ulmList.find(u => u.registration === flight.ulmRegistration);
+                if (ulm) {
+                    // Fuel consumption calculation (simplified)
+                    const consumption = (ulm.fuelConsumption / 60) * durationMinutes;
+                    fuelConsumedLiters += consumption;
+                    
+                    // Cash earned/spent calculation (assuming hourRate is per flight hour in EUR)
+                    const hourRate = ulm.hourRate || 100; // Default rate if missing
+                    const cost = (hourRate / 60) * durationMinutes;
+                    cashEarned += cost; // Placeholder: Simplistically adding cost to cash for demonstration
+                }
+            });
+
+            // Simplified update: Total hours flown, fuel balance (simulated), and cash balance (simulated)
+            const newAccounts = {
+                totalHours: totalFlightTimeMinutes,
+                fuelBalance: window.accounts.fuelBalance - fuelConsumedLiters, // Deduct consumed fuel
+                cashBalance: window.accounts.cashBalance + cashEarned // Add simulated income
             };
 
-            return (
-                <header className="bg-white shadow-md">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center py-4">
-                        <h1 className="text-xl font-bold text-indigo-600">ULM G70 Manager</h1>
-                        <nav className="flex items-center space-x-4">
-                            <button onClick={() => setView('dashboard')} className={`text-sm font-medium ${currentView === 'dashboard' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Dashboard</button>
-                            <button onClick={() => setView('reserve')} className={`text-sm font-medium ${currentView === 'reserve' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Réserver</button>
-                            <button onClick={() => setView('log')} className={`text-sm font-medium ${currentView === 'log' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Loguer Vol</button>
-                            <button onClick={() => setView('costs')} className={`text-sm font-medium ${currentView === 'costs' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Comptabilité</button>
-                            
-                            {isAdmin && (
-                                <button onClick={() => setView('admin')} className={`text-sm font-medium ${currentView === 'admin' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Admin</button>
-                            )}
-                            <button onClick={handleLogout} className="text-sm font-medium text-red-500 hover:text-red-700">Déconnexion</button>
-                        </nav>
-                    </div>
-                </header>
-            );
+            const accountDocRef = doc(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "accounts", "userBalance");
+            setDoc(accountDocRef, newAccounts, { merge: true }).catch(e => console.error("Error updating accounts:", e));
         };
 
-        // Rendre le composant App disponible globalement
-        window.App = { default: App }; 
+
+        // --- UI RENDERING & ROUTING ---
+
+        window.renderMessage = (title, message, bgColor = "bg-primary-blue") => {
+            const container = document.getElementById('main-content');
+            container.innerHTML = `
+                <div class="p-6 md:p-10 rounded-xl shadow-lg ${bgColor} text-white max-w-lg mx-auto mt-10">
+                    <h2 class="text-2xl font-bold mb-3">${title}</h2>
+                    <p>${message}</p>
+                </div>
+            `;
+        };
+
+        window.renderApp = () => {
+            const container = document.getElementById('main-content');
+            if (!window.userId) {
+                window.renderMessage("Chargement...", "Authentification en cours...", "bg-gray-500");
+                return;
+            }
+
+            // Simple client-side router
+            switch (window.currentView) {
+                case 'dashboard':
+                    container.innerHTML = renderDashboard();
+                    break;
+                case 'reservation':
+                    container.innerHTML = renderReservation();
+                    break;
+                case 'log-flight':
+                    container.innerHTML = renderLogFlight();
+                    break;
+                case 'accounting':
+                    container.innerHTML = renderAccounting();
+                    break;
+                default:
+                    container.innerHTML = renderDashboard();
+            }
+            // Re-attach event listeners after DOM update
+            attachEventListeners();
+        };
+
+        window.navigateTo = (view) => {
+            window.currentView = view;
+            window.renderApp();
+            // Close mobile menu after navigation
+            if (window.innerWidth < 768) {
+                document.getElementById('nav-menu').classList.remove('show-mobile');
+                document.getElementById('nav-menu').classList.add('hidden-mobile');
+                document.getElementById('menu-button').classList.remove('hidden');
+                document.getElementById('close-button').classList.add('hidden');
+            }
+        };
+
+        // --- VIEW TEMPLATES ---
+
+        const renderDashboard = () => {
+            const totalHours = window.formatHours(window.accounts.totalHours);
+            const nextReservation = window.reservations.find(r => r.date && r.date >= new Date());
+            const latestFlight = window.flights[0]; // Already sorted descending
+
+            return `
+                <div class="space-y-8 p-4 md:p-8">
+                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Tableau de Bord</h1>
+
+                    <!-- Statistiques Clés -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <!-- Total Heures de Vol -->
+                        <div class="bg-card-bg p-6 rounded-xl shadow-md transition duration-300 hover:shadow-lg border-t-4 border-primary-blue">
+                            <p class="text-sm font-medium text-gray-500">Total Heures de Vol (Pilote)</p>
+                            <p class="text-4xl font-bold text-primary-blue mt-1">${totalHours}</p>
+                        </div>
+                        <!-- Solde Caisse -->
+                        <div class="bg-card-bg p-6 rounded-xl shadow-md transition duration-300 hover:shadow-lg border-t-4 border-secondary-yellow">
+                            <p class="text-sm font-medium text-gray-500">Solde Caisse (Simulé)</p>
+                            <p class="text-4xl font-bold text-green-600 mt-1">${window.formatCurrency(window.accounts.cashBalance)}</p>
+                        </div>
+                        <!-- ULM Disponibles -->
+                        <div class="bg-card-bg p-6 rounded-xl shadow-md transition duration-300 hover:shadow-lg border-t-4 border-gray-400">
+                            <p class="text-sm font-medium text-gray-500">ULM Enregistrés</p>
+                            <p class="text-4xl font-bold text-gray-800 mt-1">${window.ulmList.length}</p>
+                        </div>
+                    </div>
+
+                    <!-- Prochaine Réservation -->
+                    <div class="bg-card-bg p-6 rounded-xl shadow-md">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex justify-between items-center">
+                            Prochaine Réservation
+                            <button onclick="window.navigateTo('reservation')" class="text-sm font-medium text-primary-blue hover:text-primary-blue/80 transition">Voir toutes</button>
+                        </h2>
+                        ${nextReservation ? `
+                            <p class="text-2xl font-bold text-green-600">${nextReservation.ulmRegistration}</p>
+                            <p class="text-gray-600 mt-1">Le ${nextReservation.date.toLocaleDateString('fr-FR')} à ${nextReservation.date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+                            <p class="text-sm text-gray-500 mt-2">Destination : ${nextReservation.destination}</p>
+                        ` : `
+                            <p class="text-gray-500 italic">Aucune réservation à venir.</p>
+                            <button onclick="window.navigateTo('reservation')" class="mt-3 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-secondary-yellow hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary-yellow">
+                                Réserver un ULM
+                            </button>
+                        `}
+                    </div>
+
+                    <!-- Dernier Vol -->
+                    <div class="bg-card-bg p-6 rounded-xl shadow-md">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex justify-between items-center">
+                            Dernier Vol Enregistré
+                            <button onclick="window.navigateTo('log-flight')" class="text-sm font-medium text-primary-blue hover:text-primary-blue/80 transition">Voir Log de Vol</button>
+                        </h2>
+                        ${latestFlight ? `
+                            <div class="border-l-4 border-primary-blue pl-4">
+                                <p class="text-lg font-bold">${latestFlight.ulmRegistration} - ${latestFlight.date.toLocaleDateString('fr-FR')}</p>
+                                <p class="text-gray-600">Durée : <span class="font-semibold">${latestFlight.duration}</span></p>
+                                <p class="text-sm text-gray-500">De ${latestFlight.departure} à ${latestFlight.arrival}</p>
+                            </div>
+                        ` : `
+                            <p class="text-gray-500 italic">Aucun vol enregistré pour le moment.</p>
+                        `}
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderReservation = () => {
+            const today = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM format
+
+            const reservationListHTML = window.reservations.length > 0
+                ? window.reservations.map(res => {
+                    const statusClass = res.date < new Date() ? 'text-red-500' : 'text-green-600';
+                    return `
+                        <div class="p-4 bg-white rounded-lg shadow flex justify-between items-center border-l-4 border-primary-blue">
+                            <div>
+                                <p class="text-lg font-semibold text-gray-800">${res.ulmRegistration} - ${res.destination}</p>
+                                <p class="text-sm text-gray-600">${res.date.toLocaleDateString('fr-FR')} à ${res.date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+                                <p class="text-xs mt-1 ${statusClass}">${res.date < new Date() ? 'Passée' : 'À venir'}</p>
+                            </div>
+                            <button data-reservation-id="${res.id}" class="delete-reservation-btn text-red-500 hover:text-red-700 transition duration-150">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 6h6v10H7V6z" clip-rule="evenodd" /></svg>
+                            </button>
+                        </div>
+                    `;
+                }).join('')
+                : '<p class="text-gray-500 italic p-4 text-center">Aucune réservation enregistrée.</p>';
+
+            const ulmOptions = window.ulmList.map(ulm =>
+                `<option value="${ulm.registration}">${ulm.registration} (${ulm.model}) - ${ulm.hourRate}€/h</option>`
+            ).join('');
+
+            return `
+                <div class="space-y-8 p-4 md:p-8">
+                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Gestion des Réservations</h1>
+
+                    <!-- Formulaire de Nouvelle Réservation -->
+                    <div class="bg-card-bg p-6 rounded-xl shadow-lg">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Nouvelle Réservation</h2>
+                        <form id="reservation-form" class="space-y-4">
+                            <div>
+                                <label for="res-ulm" class="block text-sm font-medium text-gray-700">ULM</label>
+                                <select id="res-ulm" required class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary-blue focus:border-primary-blue sm:text-sm rounded-md shadow-sm">
+                                    <option value="">Sélectionner un ULM</option>
+                                    ${ulmOptions}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="res-datetime" class="block text-sm font-medium text-gray-700">Date & Heure</label>
+                                <input type="datetime-local" id="res-datetime" required min="${today}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
+                            </div>
+                            <div>
+                                <label for="res-destination" class="block text-sm font-medium text-gray-700">Destination/Note</label>
+                                <input type="text" id="res-destination" placeholder="Ex: Vol local, Navette LFPN" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
+                            </div>
+                            <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-blue hover:bg-primary-blue/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-blue transition duration-150">
+                                Enregistrer la Réservation
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Liste des Réservations -->
+                    <div>
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Réservations Actuelles et Futures</h2>
+                        <div class="space-y-3">
+                            ${reservationListHTML}
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderLogFlight = () => {
+            const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
+
+            const flightListHTML = window.flights.length > 0
+                ? window.flights.map(flight => {
+                    return `
+                        <div class="p-4 bg-white rounded-lg shadow border-l-4 border-secondary-yellow">
+                            <p class="text-lg font-semibold text-gray-800">${flight.ulmRegistration} (${flight.date.toLocaleDateString('fr-FR')})</p>
+                            <p class="text-sm text-gray-600">Durée: <span class="font-bold text-primary-blue">${flight.duration}</span></p>
+                            <p class="text-xs text-gray-500">Départ: ${flight.departure}, Arrivée: ${flight.arrival}</p>
+                            <p class="text-xs text-gray-500">Notes: ${flight.notes || 'N/A'}</p>
+                        </div>
+                    `;
+                }).join('')
+                : '<p class="text-gray-500 italic p-4 text-center">Aucun vol enregistré.</p>';
+
+            const ulmOptions = window.ulmList.map(ulm =>
+                `<option value="${ulm.registration}">${ulm.registration} (${ulm.model})</option>`
+            ).join('');
+
+            return `
+                <div class="space-y-8 p-4 md:p-8">
+                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Log de Vol</h1>
+
+                    <!-- Formulaire d'Enregistrement de Vol -->
+                    <div class="bg-card-bg p-6 rounded-xl shadow-lg">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Enregistrer un Nouveau Vol</h2>
+                        <form id="flight-log-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- ULM -->
+                            <div>
+                                <label for="flight-ulm" class="block text-sm font-medium text-gray-700">ULM</label>
+                                <select id="flight-ulm" required class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary-blue focus:border-primary-blue sm:text-sm rounded-md shadow-sm">
+                                    <option value="">Sélectionner un ULM</option>
+                                    ${ulmOptions}
+                                </select>
+                            </div>
+                            <!-- Date -->
+                            <div>
+                                <label for="flight-date" class="block text-sm font-medium text-gray-700">Date</label>
+                                <input type="date" id="flight-date" required max="${today}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
+                            </div>
+                            <!-- Durée -->
+                            <div>
+                                <label for="flight-duration" class="block text-sm font-medium text-gray-700">Durée (HhMM)</label>
+                                <input type="text" id="flight-duration" pattern="\\d{1,2}h\\d{2}" placeholder="Ex: 1h30" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
+                                <p class="text-xs text-gray-500 mt-1">Format requis: 1h30, 0h45, 2h00</p>
+                            </div>
+                            <!-- Départ -->
+                            <div>
+                                <label for="flight-departure" class="block text-sm font-medium text-gray-700">Aérodrome de Départ</label>
+                                <input type="text" id="flight-departure" placeholder="Ex: LFPN" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
+                            </div>
+                            <!-- Arrivée -->
+                            <div>
+                                <label for="flight-arrival" class="block text-sm font-medium text-gray-700">Aérodrome d'Arrivée</label>
+                                <input type="text" id="flight-arrival" placeholder="Ex: LFPB" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2">
+                            </div>
+                            <!-- Notes -->
+                            <div class="md:col-span-2">
+                                <label for="flight-notes" class="block text-sm font-medium text-gray-700">Notes de Vol</label>
+                                <textarea id="flight-notes" rows="2" placeholder="Ex: Test moteur, atterrissages courts" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-blue focus:ring-primary-blue sm:text-sm p-2"></textarea>
+                            </div>
+
+                            <div class="md:col-span-2">
+                                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-blue hover:bg-primary-blue/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-blue transition duration-150">
+                                    Enregistrer le Vol
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Liste des Vols -->
+                    <div>
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Historique des Vols</h2>
+                        <div class="space-y-3">
+                            ${flightListHTML}
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderAccounting = () => {
+            const cashClass = window.accounts.cashBalance >= 0 ? 'text-green-600' : 'text-red-600';
+            const fuelClass = window.accounts.fuelBalance >= 0 ? 'text-green-600' : 'text-red-600';
+            const totalHours = window.formatHours(window.accounts.totalHours);
+
+            // Placeholder for a list of transactions (to be implemented)
+            const transactionListHTML = '<p class="text-gray-500 italic">L’historique des transactions n’est pas encore disponible, mais le solde est mis à jour après chaque vol.</p>';
+
+            return `
+                <div class="space-y-8 p-4 md:p-8">
+                    <h1 class="text-3xl font-extrabold text-primary-blue border-b-2 border-secondary-yellow pb-2">Comptabilité & Bilans</h1>
+
+                    <!-- Solde Clés -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <!-- Total Heures de Vol -->
+                        <div class="bg-card-bg p-6 rounded-xl shadow-md border-t-4 border-gray-400">
+                            <p class="text-sm font-medium text-gray-500">Total Heures Volées</p>
+                            <p class="text-4xl font-bold text-gray-800 mt-1">${totalHours}</p>
+                        </div>
+                        <!-- Solde Caisse -->
+                        <div class="bg-card-bg p-6 rounded-xl shadow-md border-t-4 border-green-600">
+                            <p class="text-sm font-medium text-gray-500">Solde Caisse (Simulé)</p>
+                            <p class="text-4xl font-bold ${cashClass} mt-1">${window.formatCurrency(window.accounts.cashBalance)}</p>
+                        </div>
+                        <!-- Solde Carburant -->
+                        <div class="bg-card-bg p-6 rounded-xl shadow-md border-t-4 border-red-600">
+                            <p class="text-sm font-medium text-gray-500">Solde Carburant (Simulé - Litres)</p>
+                            <p class="text-4xl font-bold ${fuelClass} mt-1">${window.accounts.fuelBalance.toFixed(2)} L</p>
+                        </div>
+                    </div>
+
+                    <!-- Gestion des ULM (Tarifs) -->
+                    <div class="bg-card-bg p-6 rounded-xl shadow-lg">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Tarifs des ULM</h2>
+                        <div class="space-y-3">
+                            ${window.ulmList.map(ulm => `
+                                <div class="flex justify-between items-center p-3 border-b">
+                                    <p class="font-semibold">${ulm.registration} (${ulm.model})</p>
+                                    <p class="text-primary-blue font-bold">${window.formatCurrency(ulm.hourRate)} / heure</p>
+                                    <p class="text-sm text-gray-500">${ulm.fuelConsumption} L/h</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <p class="text-sm text-gray-500 mt-4 italic">Ces tarifs sont utilisés pour le calcul simulé du solde de caisse et de carburant.</p>
+                    </div>
+
+                    <!-- Historique des transactions (Futur) -->
+                    <div class="bg-card-bg p-6 rounded-xl shadow-md">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Historique des Transactions</h2>
+                        ${transactionListHTML}
+                    </div>
+                </div>
+            `;
+        };
+
+        // --- EVENT HANDLERS (Firestore Operations) ---
+
+        const handleReservationSubmit = async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const ulmRegistration = form['res-ulm'].value;
+            const datetimeLocal = form['res-datetime'].value;
+            const destination = form['res-destination'].value;
+
+            if (!window.db || !window.userId || !ulmRegistration || !datetimeLocal) return;
+
+            // Convert local datetime string to Date object
+            const date = new Date(datetimeLocal);
+
+            const newReservation = {
+                ulmRegistration,
+                date,
+                destination: destination || 'Vol non spécifié',
+                reservedBy: window.userId,
+                createdAt: serverTimestamp()
+            };
+
+            try {
+                const reservationsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "reservations");
+                await addDoc(reservationsColRef, newReservation);
+                window.renderMessage("Succès !", `Réservation de ${ulmRegistration} pour le ${date.toLocaleString('fr-FR')} enregistrée.`, "bg-green-600");
+                setTimeout(() => window.navigateTo('reservation'), 1500);
+            } catch (error) {
+                console.error("Error adding reservation:", error);
+                window.renderMessage("Erreur", "Impossible d'ajouter la réservation. Voir console.", "bg-red-500");
+            }
+        };
+
+        const handleDeleteReservation = async (e) => {
+            const button = e.target.closest('.delete-reservation-btn');
+            const reservationId = button?.dataset.reservationId;
+
+            if (!reservationId || !window.db) return;
+
+            // Use a custom modal/message box instead of confirm()
+            if (!await showConfirmationModal('Confirmation', 'Êtes-vous sûr de vouloir annuler cette réservation ?')) {
+                return;
+            }
+
+            try {
+                const reservationDocRef = doc(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "public", "data", "reservations", reservationId);
+                await deleteDoc(reservationDocRef);
+                window.renderMessage("Annulée", "La réservation a été supprimée.", "bg-gray-500");
+                setTimeout(() => window.navigateTo('reservation'), 1500);
+            } catch (error) {
+                console.error("Error deleting reservation:", error);
+                window.renderMessage("Erreur", "Impossible de supprimer la réservation. Voir console.", "bg-red-500");
+            }
+        };
+
+        const handleFlightLogSubmit = async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const ulmRegistration = form['flight-ulm'].value;
+            const dateStr = form['flight-date'].value;
+            const duration = form['flight-duration'].value;
+            const departure = form['flight-departure'].value;
+            const arrival = form['flight-arrival'].value;
+            const notes = form['flight-notes'].value;
+
+            if (!window.db || !window.userId || !ulmRegistration || !dateStr || !duration) return;
+
+            // Simple date conversion for Firestore
+            const date = new Date(dateStr);
+
+            const newFlight = {
+                ulmRegistration,
+                date,
+                duration,
+                departure,
+                arrival,
+                notes,
+                pilotId: window.userId,
+                createdAt: serverTimestamp()
+            };
+
+            try {
+                const flightsColRef = collection(window.db, "artifacts", typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', "users", window.userId, "flights");
+                await addDoc(flightsColRef, newFlight);
+                window.renderMessage("Vol Enregistré", `${ulmRegistration} - ${duration} ajouté à votre log.`, "bg-green-600");
+                setTimeout(() => window.navigateTo('log-flight'), 1500);
+            } catch (error) {
+                console.error("Error adding flight log:", error);
+                window.renderMessage("Erreur", "Impossible d'ajouter le vol. Voir console.", "bg-red-500");
+            }
+        };
+
+        // --- MODAL / MESSAGE BOX IMPLEMENTATION (Replacing alert/confirm) ---
+
+        // Function to show a custom confirmation modal
+        window.showConfirmationModal = (title, message) => {
+            return new Promise(resolve => {
+                const modalHtml = `
+                    <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
+                        <div class="bg-white rounded-lg p-6 shadow-xl max-w-sm w-full">
+                            <h3 class="text-lg font-bold text-gray-900 mb-4">${title}</h3>
+                            <p class="text-sm text-gray-500 mb-6">${message}</p>
+                            <div class="flex justify-end space-x-3">
+                                <button id="modal-cancel" class="px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-gray-200 hover:bg-gray-300 transition">
+                                    Annuler
+                                </button>
+                                <button id="modal-confirm" class="px-4 py-2 text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 transition">
+                                    Confirmer
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+                const modal = document.getElementById('custom-modal');
+                document.getElementById('modal-cancel').onclick = () => {
+                    modal.remove();
+                    resolve(false);
+                };
+                document.getElementById('modal-confirm').onclick = () => {
+                    modal.remove();
+                    resolve(true);
+                };
+            });
+        };
+
+        // --- GENERAL EVENT LISTENERS & INITIALIZATION ---
+
+        const attachEventListeners = () => {
+            // Reservation Form
+            const resForm = document.getElementById('reservation-form');
+            if (resForm) {
+                resForm.onsubmit = handleReservationSubmit;
+            }
+
+            // Delete Reservation Buttons
+            document.querySelectorAll('.delete-reservation-btn').forEach(button => {
+                button.onclick = handleDeleteReservation;
+            });
+
+            // Flight Log Form
+            const flightForm = document.getElementById('flight-log-form');
+            if (flightForm) {
+                flightForm.onsubmit = handleFlightLogSubmit;
+            }
+
+            // Mobile Menu Toggle
+            const menuButton = document.getElementById('menu-button');
+            const closeButton = document.getElementById('close-button');
+            const navMenu = document.getElementById('nav-menu');
+
+            if (menuButton && closeButton && navMenu) {
+                menuButton.onclick = () => {
+                    navMenu.classList.remove('hidden-mobile');
+                    navMenu.classList.add('show-mobile');
+                    menuButton.classList.add('hidden');
+                    closeButton.classList.remove('hidden');
+                };
+                closeButton.onclick = () => {
+                    navMenu.classList.remove('show-mobile');
+                    navMenu.classList.add('hidden-mobile');
+                    menuButton.classList.remove('hidden');
+                    closeButton.classList.add('hidden');
+                };
+            }
+        };
+
+        // Start the application after the document is loaded
+        window.onload = initializeFirebase;
+
     </script>
-    
-    <script type="text/babel">
-      const App = window.App.default; // Récupère le composant App exposé globalement
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(
-        <React.StrictMode>
-          <App />
-        </React.StrictMode>
-      );
-    </script>
+
+
+    <!-- --- APPLICATION STRUCTURE (HTML) --- -->
+
+    <!-- Header / Navigation Bar -->
+    <header class="bg-primary-blue text-white shadow-lg sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo/Title -->
+                <div class="flex-shrink-0">
+                    <span class="text-xl font-bold tracking-wider">ULM Manager</span>
+                </div>
+
+                <!-- Desktop Menu -->
+                <nav class="hidden md:flex md:space-x-8">
+                    <button onclick="window.navigateTo('dashboard')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Tableau de Bord</button>
+                    <button onclick="window.navigateTo('reservation')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Réservations</button>
+                    <button onclick="window.navigateTo('log-flight')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Log de Vol</button>
+                    <button onclick="window.navigateTo('accounting')" class="text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-sm font-medium transition duration-150">Comptabilité</button>
+                </nav>
+
+                <!-- Mobile Menu Button -->
+                <div class="md:hidden flex items-center">
+                    <button id="menu-button" type="button" class="inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-primary-blue/70 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white">
+                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                    </button>
+                    <button id="close-button" type="button" class="hidden inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-primary-blue/70 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white">
+                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Menu (Hidden by default) -->
+        <div id="nav-menu" class="md:hidden absolute top-0 left-0 h-screen w-3/4 bg-primary-blue shadow-2xl hidden-mobile">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3 mt-16">
+                <button onclick="window.navigateTo('dashboard')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Tableau de Bord</button>
+                <button onclick="window.navigateTo('reservation')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Réservations</button>
+                <button onclick="window.navigateTo('log-flight')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Log de Vol</button>
+                <button onclick="window.navigateTo('accounting')" class="block w-full text-left text-gray-300 hover:bg-primary-blue/70 px-3 py-2 rounded-md text-base font-medium transition duration-150">Comptabilité</button>
+            </div>
+            <div class="px-5 py-3 border-t border-primary-blue/50">
+                <p id="user-id-display" class="text-xs text-gray-400">ID Utilisateur: Chargement...</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow max-w-7xl mx-auto w-full">
+        <div id="main-content" class="p-4 sm:p-6 lg:p-8">
+            <!-- Content will be injected here by JavaScript (renderApp function) -->
+            <div class="flex justify-center items-center h-64">
+                <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary-blue"></div>
+                <p class="ml-4 text-primary-blue font-semibold">Chargement de l'application...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer (Optional) -->
+    <footer class="bg-gray-800 text-white p-4 text-center text-sm mt-auto">
+        <p>&copy; 2024 ULM Manager. Propulsé par Google & Firebase.</p>
+    </footer>
+
 </body>
 </html>

@@ -98,7 +98,7 @@ const insertRecord = async (tableName, recordData) => {
 // --- COMPOSANTS DE VUES ---
 
 // 1. Vue Administration
-const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId, onUpdate, onAddPilot, onAddCategory, onUpdateAircraft }) => {
+const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) => {
     const [newPilotEmail, setNewPilotEmail] = useState('');
     const [newPilotName, setNewPilotName] = useState('');
     const [newCategoryName, setNewCategoryName] = useState('');
@@ -109,14 +109,14 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId, onU
         e.preventDefault();
         if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
 
-        // Dans un environnement réel Supabase, ceci créerait un utilisateur Auth et un profil
-        // Ici, nous simulons l'ajout à la table des co_owners
+        // NOTE: Dans la version Supabase, ceci ne crée PAS d'utilisateur Auth réel.
+        // L'utilisateur devra s'authentifier par lui-même ensuite.
         const newPilot = {
             name: newPilotName,
             email: newPilotEmail,
             is_admin: false, // Colonne renommée pour Supabase (snake_case)
-            // Simule un UID pour le mappage futur (Supabase Auth devrait être utilisé ici)
-            uid: `simulated-uid-${Date.now()}`,
+            // Simule un ID pour la table co_owners. Idéalement, l'UID Supabase serait utilisé ici.
+            id: `simulated-uid-${Date.now()}`,
             created_at: new Date().toISOString()
         };
 
@@ -127,7 +127,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId, onU
         } else {
             setNewPilotEmail('');
             setNewPilotName('');
-            alert("Pilote ajouté. Assurez-vous d'implémenter l'Auth Supabase pour une gestion complète.");
+            alert("Pilote ajouté. Assurez-vous que l'utilisateur s'authentifie pour que son UID soit lié à son profil.");
         }
     };
 
@@ -205,10 +205,10 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId, onU
                     {/* Liste des Pilotes */}
                     <div className="space-y-2">
                         {pilots.map((p) => (
-                            <div key={p.uid || p.id} className="flex justify-between items-center p-3 border-b">
+                            <div key={p.id} className="flex justify-between items-center p-3 border-b">
                                 <div>
                                     <p className="font-semibold">{p.name}</p>
-                                    <p className="text-sm text-gray-500 truncate">{p.uid || p.id}</p>
+                                    <p className="text-sm text-gray-500 truncate">{p.id}</p>
                                 </div>
                                 <span className={`text-xs font-bold px-3 py-1 rounded-full ${p.is_admin ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                                     {p.is_admin ? 'Admin' : 'Membre'}
@@ -283,7 +283,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId, onU
 };
 
 // 2. Composant Modale pour l'ajout de dépense
-const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories, onAdd }) => {
+const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories }) => {
     const [date, setDate] = useState('');
     const [amount, setAmount] = useState('');
     const [type, setType] = useState('Maintenance');
@@ -315,6 +315,11 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories, onAdd }) 
     };
 
     if (!isOpen) return null;
+
+    const allCategories = [
+        { value: 'Maintenance', label: 'Maintenance (Prévue)' },
+        ...expenseCategories
+    ];
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
@@ -350,8 +355,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories, onAdd }) 
                             className={MobileInputStyle.replace('text-lg', 'text-base p-3')}
                             required
                         >
-                            <option value="Maintenance">Maintenance (Prévue)</option>
-                            {expenseCategories.map(cat => (
+                            {allCategories.map(cat => (
                                 <option key={cat.value} value={cat.value}>{cat.label}</option>
                             ))}
                         </select>
@@ -382,7 +386,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories, onAdd }) 
 
 
 // 3. Vue Comptabilité
-const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours }) => {
+const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours, expenseCategories }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     // Calculs agrégés
@@ -480,8 +484,7 @@ const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours }) => 
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 userId={aircraftData.user_id} // Mocked user_id
-                expenseCategories={[]} // Utiliser l'état réel si disponible
-                onAdd={() => { /* Le temps réel gère la mise à jour */ }}
+                expenseCategories={expenseCategories} 
             />
         </div>
     );
@@ -572,7 +575,7 @@ const LogFlightView = ({ userId, pilots, aircraftData }) => {
                         >
                             <option value="">Sélectionner un pilote</option>
                             {pilots.map(p => (
-                                <option key={p.uid || p.id} value={p.uid || p.id}>{p.name}</option>
+                                <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                         </select>
                     </div>
@@ -922,69 +925,12 @@ const App = () => {
     const isConnected = !!supabase;
 
     // 1. Authentification Supabase et Initialisation de l'utilisateur
-    useEffect(() => {
-        if (!isConnected) {
-            // Mode démo si Supabase n'est pas initialisé
-            setUserId(crypto.randomUUID());
-            setCurrentPilot({ name: 'Pilote Démo', is_admin: true });
-            setIsAdmin(true);
-            setIsAuthReady(true);
-            return;
-        }
-
-        // Tente de récupérer la session existante ou de se connecter anonymement
-        const checkAuth = async () => {
-            let user = (await supabase.auth.getSession()).data.session?.user;
-
-            if (!user) {
-                // Tente de se connecter anonymement
-                const { data, error } = await supabase.auth.signInAnonymously();
-                if (error) {
-                    console.error("Erreur de connexion anonyme Supabase:", error);
-                    return;
-                }
-                user = data.user;
-            }
-
-            if (user) {
-                const currentUserId = user.id;
-                setUserId(currentUserId);
-                
-                // Récupération ou création du profil utilisateur
-                const { data: profile, error } = await upsertRecord('co_owners', {
-                    id: currentUserId, // Supabase utilise 'id' comme PK pour les profils
-                    name: `Pilote-${currentUserId.substring(0, 4)}`,
-                    email: user.email || 'N/A',
-                    is_admin: pilots.length === 0, // Le premier utilisateur est admin
-                    created_at: new Date().toISOString()
-                }, 'id');
-
-                const userData = profile?.[0] || { name: `Pilote-${currentUserId.substring(0, 4)}`, is_admin: pilots.length === 0 };
-
-                setCurrentPilot(userData);
-                setIsAdmin(userData.is_admin || false);
-            }
-            setIsAuthReady(true);
-        };
-
-        checkAuth();
-
-        // Écoute des changements d'état d'authentification Supabase
-        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-            if (session?.user) {
-                checkAuth(); // Re-vérifie le profil
-            }
-        });
-
-        return () => {
-            authListener?.subscription.unsubscribe();
-        };
-
-    }, [isConnected, pilots.length]); // Dépend de pilots.length pour initialiser l'admin
+    // NOTE: Utilisation d'un drapeau pour s'assurer que les données 'pilots' sont chargées avant de créer/mettre à jour le profil.
+    const [isPilotsLoaded, setIsPilotsLoaded] = useState(false);
 
     // 2. Chargement des données temps réel (Supabase)
     useEffect(() => {
-        if (!isConnected || !isAuthReady) return;
+        if (!isConnected) return;
 
         // Écouteur ULM (Singleton)
         const fetchAndSubscribeAircraft = async () => {
@@ -1004,7 +950,11 @@ const App = () => {
         };
         fetchAndSubscribeAircraft();
 
-        const unsubPilots = subscribeToTable('co_owners', setPilots, 'id');
+        const unsubPilots = subscribeToTable('co_owners', (data) => {
+            setPilots(data);
+            setIsPilotsLoaded(true); // Marquer les pilotes comme chargés
+        }, 'id');
+
         const unsubReservations = subscribeToTable('reservations', setReservations);
         const unsubLogs = subscribeToTable('flight_logs', setFlightLogs);
         const unsubExpenses = subscribeToTable('expenses', setExpenses);
@@ -1029,7 +979,88 @@ const App = () => {
             unsubCategories();
             supabase.removeChannel(aircraftSubscription);
         };
-    }, [isConnected, isAuthReady, userId]);
+    }, [isConnected]); // Dépend de isConnected uniquement
+
+    // 3. Gestion de l'authentification et du profil (Dépend de isPilotsLoaded)
+    useEffect(() => {
+        if (!isConnected) {
+            // Mode démo si Supabase n'est pas initialisé
+            setUserId(crypto.randomUUID());
+            setCurrentPilot({ name: 'Pilote Démo', is_admin: true });
+            setIsAdmin(true);
+            setIsAuthReady(true);
+            return;
+        }
+
+        if (!isPilotsLoaded) return; // Attend que la liste des pilotes soit chargée
+
+        const checkAuthAndProfile = async () => {
+            let user = (await supabase.auth.getSession()).data.session?.user;
+
+            if (!user) {
+                // Tente de se connecter anonymement
+                const { data, error } = await supabase.auth.signInAnonymously();
+                if (error) {
+                    console.error("Erreur de connexion anonyme Supabase:", error);
+                    return;
+                }
+                user = data.user;
+            }
+
+            if (user) {
+                const currentUserId = user.id;
+                setUserId(currentUserId);
+                
+                // Vérifie si le profil existe déjà
+                const existingProfile = pilots.find(p => p.id === currentUserId);
+                const isFirstUser = pilots.length === 0;
+
+                let userData;
+
+                if (existingProfile) {
+                    userData = existingProfile;
+                } else {
+                    // Création du profil pour le nouvel utilisateur (anonyme)
+                    const newProfile = {
+                        id: currentUserId, // UID Supabase
+                        name: `Pilote-${currentUserId.substring(0, 4)}`,
+                        email: user.email || 'N/A (Anonyme)',
+                        is_admin: isFirstUser, // Le premier utilisateur devient admin
+                        created_at: new Date().toISOString()
+                    };
+
+                    const { data: profileData, error: profileError } = await insertRecord('co_owners', newProfile);
+
+                    if (profileError) {
+                         // Peut échouer si deux clients créent en même temps, on se rabat sur la liste chargée
+                        console.warn("Erreur de création de profil, réessai de récupération:", profileError);
+                        userData = newProfile; // Utilise les données locales pour éviter le blocage
+                    } else {
+                         userData = profileData?.[0] || newProfile;
+                    }
+                }
+
+                setCurrentPilot(userData);
+                setIsAdmin(userData.is_admin || false);
+            }
+            setIsAuthReady(true);
+        };
+
+        checkAuthAndProfile();
+
+        // Écoute des changements d'état d'authentification Supabase
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+            if (session?.user) {
+                checkAuthAndProfile(); // Re-vérifie le profil
+            }
+        });
+
+        return () => {
+            authListener?.subscription.unsubscribe();
+        };
+
+    }, [isConnected, isPilotsLoaded, pilots]);
+
 
     // Calcul du Coût Horaire et des Heures Totales
     const totalFlightHours = useMemo(() =>
@@ -1094,13 +1125,14 @@ const App = () => {
                     flightLogs={flightLogs}
                     aircraftData={aircraftData}
                     totalFlightHours={totalFlightHours}
+                    expenseCategories={expenseCategories}
                 />;
             case 'admin':
                 if (!isAdmin) return <div className="text-center p-20 text-red-600 font-semibold">Accès Refusé. Droits Admin Requis.</div>;
                 return <AdminView
                     pilots={pilots}
                     aircraftData={aircraftData}
-                    expenseCategories={allCategories}
+                    expenseCategories={expenseCategories}
                     currentUserId={userId}
                 />;
             default:

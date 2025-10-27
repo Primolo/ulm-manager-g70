@@ -1,28 +1,21 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
-import { getFirestore, doc, onSnapshot, collection, query, addDoc, updateDoc, setDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
-import { setLogLevel } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+// Utilisation du client Supabase via CDN
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
-// Configuration Firebase globale (fournie par l'environnement Canvas)
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'ulm-manager-default-id';
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// Configuration Supabase
+// IMPORTANT : Dans un environnement Vercel, vous DEVEZ injecter ces variables
+// d'environnement (VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY).
+const supabaseUrl = typeof VITE_SUPABASE_URL !== 'undefined' ? VITE_SUPABASE_URL : null;
+const supabaseAnonKey = typeof VITE_SUPABASE_ANON_KEY !== 'undefined' ? VITE_SUPABASE_ANON_KEY : null;
 
-// Initialisation de Firebase
-const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
-const db = app ? getFirestore(app) : null;
-const auth = app ? getAuth(app) : null;
+// Initialisation du client Supabase
+const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
-// Activer le mode debug pour Firestore
-if (db) setLogLevel('debug');
+// Identifiant d'application par défaut pour les tables publiques (utilisé ici pour le schéma Supabase)
+const appId = 'ulm-manager-default-id';
+const AIRCRAFT_ID = 'G70'; // ID fixe pour l'ULM unique
 
 // --- CONSTANTES ET FONCTIONS UTILITAIRES ---
-
-// Chemins de collections publics
-const getCollectionPath = (collectionName) => {
-    return `artifacts/${appId}/public/data/${collectionName}`;
-};
 
 // Styles Tailwind CSS réutilisables
 const PrimaryButtonStyle = "w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition duration-200 ease-in-out";
@@ -30,10 +23,82 @@ const SecondaryButtonStyle = "w-full py-2 px-4 bg-white text-indigo-600 border b
 const MobileInputStyle = "w-full p-4 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 text-lg";
 const CardStyle = "bg-white p-6 rounded-2xl shadow-xl";
 
+// --- FONCTIONS SUPABASE POUR LE TEMPS RÉEL ET CRUD ---
+
+// Écoute en temps réel d'une table Supabase
+const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
+    if (!supabase) return () => {};
+
+    // Fonction de récupération initiale
+    const fetchInitialData = async () => {
+        const { data, error } = await supabase
+            .from(tableName)
+            .select('*');
+
+        if (error) {
+            console.error(`Erreur de chargement initial pour ${tableName}:`, error);
+        } else {
+            // Firestore utilise doc.id, Supabase utilise la PK (souvent 'id')
+            setState(data.map(item => ({ ...item, id: item[primaryKey] })));
+        }
+    };
+
+    fetchInitialData();
+
+    // Écouteur temps réel
+    const subscription = supabase
+        .channel(tableName)
+        .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
+            fetchInitialData(); // Re-fetch pour simplifier le traitement des modifications
+        })
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(subscription);
+    };
+};
+
+// Récupère une seule entrée (pour l'ULM et l'utilisateur)
+const fetchSingleRecord = async (tableName, recordId, setState) => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .eq('id', recordId) // Assumons que la clé primaire est 'id'
+        .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = pas de ligne trouvée
+        console.error(`Erreur de chargement de l'enregistrement ${recordId} dans ${tableName}:`, error);
+    } else if (data) {
+        setState({ ...data, id: recordId });
+    }
+};
+
+// Mise à jour ou insertion
+const upsertRecord = async (tableName, recordData, primaryKeyField = 'id') => {
+    if (!supabase) return { error: { message: "Supabase non connecté." } };
+    const { data, error } = await supabase
+        .from(tableName)
+        .upsert(recordData, { onConflict: primaryKeyField })
+        .select();
+    return { data, error };
+};
+
+// Insertion
+const insertRecord = async (tableName, recordData) => {
+    if (!supabase) return { error: { message: "Supabase non connecté." } };
+    const { data, error } = await supabase
+        .from(tableName)
+        .insert(recordData)
+        .select();
+    return { data, error };
+};
+
+
 // --- COMPOSANTS DE VUES ---
 
 // 1. Vue Administration
-const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId, onUpdate, onAddPilot, onAddCategory, onUpdateAircraft }) => {
+const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId, onUpdate, onAddPilot, onAddCategory, onUpdateAircraft }) => {
     const [newPilotEmail, setNewPilotEmail] = useState('');
     const [newPilotName, setNewPilotName] = useState('');
     const [newCategoryName, setNewCategoryName] = useState('');
@@ -42,53 +107,67 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
     // Simulation de l'ajout d'un pilote
     const handleAddPilot = async (e) => {
         e.preventDefault();
-        if (!newPilotEmail || !newPilotName || !db) return alert("Erreur: Base de données non connectée.");
+        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
 
-        // Dans un environnement réel, ceci créerait un utilisateur Supabase/Firebase Auth.
-        // Ici, nous simulons l'ajout à la liste des co-propriétaires
+        // Dans un environnement réel Supabase, ceci créerait un utilisateur Auth et un profil
+        // Ici, nous simulons l'ajout à la table des co_owners
         const newPilot = {
             name: newPilotName,
             email: newPilotEmail,
-            isAdmin: false,
-            // Simule l'UID pour l'affichage
-            uid: `simulated-uid-${Date.now()}`, 
+            is_admin: false, // Colonne renommée pour Supabase (snake_case)
+            // Simule un UID pour le mappage futur (Supabase Auth devrait être utilisé ici)
+            uid: `simulated-uid-${Date.now()}`,
+            created_at: new Date().toISOString()
         };
 
-        const colRef = collection(db, getCollectionPath('co_owners'));
-        await addDoc(colRef, newPilot);
+        const { error } = await insertRecord('co_owners', newPilot);
 
-        setNewPilotEmail('');
-        setNewPilotName('');
-        alert("Pilote ajouté (simulation Firestore). Un vrai système nécessiterait une invitation Auth.");
+        if (error) {
+            alert(`Erreur d'ajout: ${error.message}`);
+        } else {
+            setNewPilotEmail('');
+            setNewPilotName('');
+            alert("Pilote ajouté. Assurez-vous d'implémenter l'Auth Supabase pour une gestion complète.");
+        }
     };
 
     // Ajout d'une catégorie de dépense
     const handleAddCategory = async (e) => {
         e.preventDefault();
-        if (!newCategoryName || !db) return alert("Erreur: Base de données non connectée.");
+        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
 
         const newCat = {
             value: newCategoryName.toLowerCase().replace(/\s/g, '_'),
-            label: newCategoryName
+            label: newCategoryName,
+            created_at: new Date().toISOString()
         };
 
-        const colRef = collection(db, getCollectionPath('expense_categories'));
-        await addDoc(colRef, newCat);
-        setNewCategoryName('');
+        const { error } = await insertRecord('expense_categories', newCat);
+
+        if (error) {
+            alert(`Erreur d'ajout: ${error.message}`);
+        } else {
+            setNewCategoryName('');
+        }
     };
 
     // Mise à jour des coûts fixes de l'ULM
     const handleUpdateAircraft = async (e) => {
         e.preventDefault();
-        if (!db) return alert("Erreur: Base de données non connectée.");
-        
-        const aircraftRef = doc(db, getCollectionPath('aircraft'), 'G70');
-        await setDoc(aircraftRef, {
-            name: aircraftData.name,
+        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
+
+        const { error } = await upsertRecord('aircraft', {
+            id: AIRCRAFT_ID, // Clé primaire
+            name: aircraftData.name || 'ULM G70',
             fixed_cost_annual: parseFloat(newFixedCost),
-            latest_tach_hour: aircraftData.latest_tach_hour
-        }, { merge: true });
-        alert("Coût fixe annuel mis à jour.");
+            latest_tach_hour: aircraftData.latest_tach_hour || 0.0
+        }, 'id');
+
+        if (error) {
+            alert(`Erreur de mise à jour: ${error.message}`);
+        } else {
+            alert("Coût fixe annuel mis à jour.");
+        }
     };
 
     return (
@@ -118,7 +197,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
                             className={MobileInputStyle.replace('text-lg', 'text-base p-3')}
                             required
                         />
-                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')}>
+                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')} disabled={!supabase}>
                             Ajouter le Pilote
                         </button>
                     </form>
@@ -126,13 +205,13 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
                     {/* Liste des Pilotes */}
                     <div className="space-y-2">
                         {pilots.map((p) => (
-                            <div key={p.uid} className="flex justify-between items-center p-3 border-b">
+                            <div key={p.uid || p.id} className="flex justify-between items-center p-3 border-b">
                                 <div>
                                     <p className="font-semibold">{p.name}</p>
-                                    <p className="text-sm text-gray-500 truncate">{p.uid}</p>
+                                    <p className="text-sm text-gray-500 truncate">{p.uid || p.id}</p>
                                 </div>
-                                <span className={`text-xs font-bold px-3 py-1 rounded-full ${p.isAdmin ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                                    {p.isAdmin ? 'Admin' : 'Membre'}
+                                <span className={`text-xs font-bold px-3 py-1 rounded-full ${p.is_admin ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                    {p.is_admin ? 'Admin' : 'Membre'}
                                 </span>
                             </div>
                         ))}
@@ -148,7 +227,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
                         <label className="block text-sm font-medium text-gray-700 mb-1">Nom de l'ULM</label>
                         <input
                             type="text"
-                            value={aircraftData.name}
+                            value={aircraftData.name || 'ULM G70'}
                             readOnly
                             className={MobileInputStyle.replace('text-lg', 'text-base p-3 bg-gray-100')}
                         />
@@ -166,7 +245,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
                         />
                         <p className="text-xs text-gray-500 mt-1">Assurance, hangar, révision annuelle obligatoire, etc.</p>
                     </div>
-                    <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')}>
+                    <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')} disabled={!supabase}>
                         Mettre à jour les Coûts Fixes
                     </button>
                 </form>
@@ -185,7 +264,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
                             className={MobileInputStyle.replace('text-lg', 'text-base p-3')}
                             required
                         />
-                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2').replace('w-full', 'w-auto')}>
+                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2').replace('w-full', 'w-auto')} disabled={!supabase}>
                             Ajouter
                         </button>
                     </div>
@@ -204,7 +283,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
 };
 
 // 2. Composant Modale pour l'ajout de dépense
-const AddExpenseModal = ({ isOpen, onClose, userId, db, expenseCategories, onAdd }) => {
+const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories, onAdd }) => {
     const [date, setDate] = useState('');
     const [amount, setAmount] = useState('');
     const [type, setType] = useState('Maintenance');
@@ -212,7 +291,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, db, expenseCategories, onAdd
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!date || !amount || !description || !db) return alert("Erreur: Base de données non connectée.");
+        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
 
         const newExpense = {
             date: date,
@@ -223,14 +302,16 @@ const AddExpenseModal = ({ isOpen, onClose, userId, db, expenseCategories, onAdd
             created_at: new Date().toISOString()
         };
 
-        const colRef = collection(db, getCollectionPath('expenses'));
-        await addDoc(colRef, newExpense);
+        const { error } = await insertRecord('expenses', newExpense);
 
-        // Réinitialisation et fermeture
-        setAmount('');
-        setDescription('');
-        onClose();
-        onAdd(newExpense); // Mise à jour de l'état local (pour le mock, non nécessaire avec onSnapshot)
+        if (error) {
+            alert(`Erreur d'enregistrement de la dépense: ${error.message}`);
+        } else {
+            // Réinitialisation et fermeture
+            setAmount('');
+            setDescription('');
+            onClose();
+        }
     };
 
     if (!isOpen) return null;
@@ -289,7 +370,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, db, expenseCategories, onAdd
                         <button type="button" onClick={onClose} className={SecondaryButtonStyle.replace('w-full', 'w-auto px-4')}>
                             Annuler
                         </button>
-                        <button type="submit" className={PrimaryButtonStyle.replace('w-full', 'w-auto px-4')}>
+                        <button type="submit" className={PrimaryButtonStyle.replace('w-full', 'w-auto px-4')} disabled={!supabase}>
                             Enregistrer la Dépense
                         </button>
                     </div>
@@ -321,7 +402,7 @@ const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours }) => 
 
         const totalOperationalCost = totalMaintenanceCost + totalFuelCost + fixedCostAnnual;
         return (totalOperationalCost / totalFlightHours).toFixed(2);
-    }, [totalMaintenanceCost, totalFuelHours, fixedCostAnnual]);
+    }, [totalMaintenanceCost, totalFlightHours, fixedCostAnnual, totalFuelCost]);
 
 
     return (
@@ -340,6 +421,7 @@ const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours }) => 
                 <button
                     onClick={() => setIsModalOpen(true)}
                     className="p-3 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 transition"
+                    title="Ajouter une Dépense"
                 >
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                 </button>
@@ -378,8 +460,8 @@ const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours }) => 
                     {expenses.length === 0 ? (
                         <p className="text-gray-500">Aucune dépense enregistrée.</p>
                     ) : (
-                        expenses.sort((a, b) => new Date(b.date) - new Date(a.date)).map((exp, index) => (
-                            <div key={index} className="flex justify-between p-3 bg-gray-50 rounded-lg">
+                        expenses.sort((a, b) => new Date(b.date) - new Date(a.date)).map((exp) => (
+                            <div key={exp.id} className="flex justify-between p-3 bg-gray-50 rounded-lg">
                                 <div>
                                     <p className="font-semibold">{exp.description}</p>
                                     <p className="text-xs text-indigo-500">{exp.type}</p>
@@ -398,27 +480,26 @@ const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours }) => 
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 userId={aircraftData.user_id} // Mocked user_id
-                db={db}
                 expenseCategories={[]} // Utiliser l'état réel si disponible
-                onAdd={() => { /* onSnapshot gère la mise à jour */ }}
+                onAdd={() => { /* Le temps réel gère la mise à jour */ }}
             />
         </div>
     );
 };
 
 // 4. Vue Loguer Vol (Mobile-Optimisée)
-const LogFlightView = ({ userId, db, pilots, aircraftData, onLog }) => {
+const LogFlightView = ({ userId, pilots, aircraftData }) => {
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [endTachHours, setEndTachHours] = useState('');
     const [fuelCost, setFuelCost] = useState('');
-    const [pilot, setPilot] = useState(userId);
+    const [pilot, setPilot] = useState(userId || ''); // Utilise l'UID de l'utilisateur actuel par défaut
 
     const lastTach = aircraftData.latest_tach_hour || 0.0;
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!db) return alert("Erreur: Base de données non connectée.");
-        
+        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
+
         const endHours = parseFloat(endTachHours);
         const fuel = parseFloat(fuelCost);
 
@@ -440,19 +521,27 @@ const LogFlightView = ({ userId, db, pilots, aircraftData, onLog }) => {
         };
 
         // 1. Enregistrer le vol
-        const logsRef = collection(db, getCollectionPath('flight_logs'));
-        await addDoc(logsRef, newLog);
+        const { error: logError } = await insertRecord('flight_logs', newLog);
+
+        if (logError) {
+            alert(`Erreur d'enregistrement du vol: ${logError.message}`);
+            return;
+        }
 
         // 2. Mettre à jour la dernière heure TACH de l'ULM
-        const aircraftRef = doc(db, getCollectionPath('aircraft'), 'G70');
-        await updateDoc(aircraftRef, {
+        const { error: updateError } = await upsertRecord('aircraft', {
+            id: AIRCRAFT_ID,
             latest_tach_hour: endHours
-        });
+        }, 'id');
 
-        // Réinitialisation du formulaire
-        setEndTachHours('');
-        setFuelCost('');
-        alert(`Vol enregistré ! Durée: ${duration.toFixed(2)}h. Nouvelle heure TACH: ${endHours.toFixed(1)}.`);
+        if (updateError) {
+            alert(`Erreur de mise à jour de l'heure TACH: ${updateError.message}`);
+        } else {
+            // Réinitialisation du formulaire
+            setEndTachHours('');
+            setFuelCost('');
+            alert(`Vol enregistré ! Durée: ${duration.toFixed(2)}h. Nouvelle heure TACH: ${endHours.toFixed(1)}.`);
+        }
     };
 
     return (
@@ -483,7 +572,7 @@ const LogFlightView = ({ userId, db, pilots, aircraftData, onLog }) => {
                         >
                             <option value="">Sélectionner un pilote</option>
                             {pilots.map(p => (
-                                <option key={p.uid} value={p.uid}>{p.name}</option>
+                                <option key={p.uid || p.id} value={p.uid || p.id}>{p.name}</option>
                             ))}
                         </select>
                     </div>
@@ -511,7 +600,7 @@ const LogFlightView = ({ userId, db, pilots, aircraftData, onLog }) => {
                             required
                         />
                     </div>
-                    <button type="submit" className={PrimaryButtonStyle}>
+                    <button type="submit" className={PrimaryButtonStyle} disabled={!supabase}>
                         Enregistrer le Vol et Mettre à Jour TACH
                     </button>
                 </form>
@@ -615,7 +704,7 @@ const ReservationCalendar = ({ reservations, onDateSelect }) => {
 
 
 // 6. Vue Réservation
-const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) => {
+const ReserveView = ({ userId, reservations, currentPilot }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [startTime, setStartTime] = useState('09:00');
     const [endTime, setEndTime] = useState('12:00');
@@ -631,7 +720,7 @@ const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) 
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!db) return alert("Erreur: Base de données non connectée.");
+        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
 
         const reservationStart = new Date(`${selectedDate}T${startTime}:00`);
         const reservationEnd = new Date(`${selectedDate}T${endTime}:00`);
@@ -647,16 +736,19 @@ const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) 
             end_time: endTime,
             title: title,
             user_id: userId,
-            pilot_name: currentPilot.name,
+            pilot_name: currentPilot.name || 'Pilote Inconnu',
             created_at: new Date().toISOString()
         };
 
-        const colRef = collection(db, getCollectionPath('reservations'));
-        await addDoc(colRef, newReservation);
+        const { error } = await insertRecord('reservations', newReservation);
 
-        // Réinitialisation
-        setTitle('');
-        alert("Réservation enregistrée avec succès !");
+        if (error) {
+            alert(`Erreur d'enregistrement de la réservation: ${error.message}`);
+        } else {
+            // Réinitialisation
+            setTitle('');
+            alert("Réservation enregistrée avec succès !");
+        }
     };
 
     return (
@@ -671,8 +763,8 @@ const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) 
                         <p className="text-sm text-gray-600">Aucune réservation pour cette date.</p>
                     ) : (
                         <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {reservationsForSelectedDay.sort((a, b) => a.start_time.localeCompare(b.start_time)).map((res, index) => (
-                                <div key={index} className="flex justify-between text-sm p-2 bg-white rounded-lg shadow-sm">
+                            {reservationsForSelectedDay.sort((a, b) => a.start_time.localeCompare(b.start_time)).map((res) => (
+                                <div key={res.id} className="flex justify-between text-sm p-2 bg-white rounded-lg shadow-sm">
                                     <span className="font-medium truncate">{res.title || "Réservation ULM"}</span>
                                     <span className="text-indigo-500">{res.start_time} - {res.end_time}</span>
                                 </div>
@@ -734,7 +826,7 @@ const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) 
                         />
                     </div>
 
-                    <button type="submit" className={PrimaryButtonStyle}>
+                    <button type="submit" className={PrimaryButtonStyle} disabled={!supabase}>
                         Confirmer la Réservation
                     </button>
                 </form>
@@ -745,7 +837,7 @@ const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) 
 
 
 // 7. Vue Tableau de Bord
-const DashboardView = ({ aircraftData, pilots, totalFlightHours, realHourlyCost }) => {
+const DashboardView = ({ aircraftData, pilots, totalFlightHours, realHourlyCost, isConnected }) => {
     const lastTach = aircraftData.latest_tach_hour || 0.0;
 
     const PilotCard = ({ icon, label, value, unit, color }) => (
@@ -764,8 +856,14 @@ const DashboardView = ({ aircraftData, pilots, totalFlightHours, realHourlyCost 
         <div className="py-8 px-4 max-w-6xl mx-auto space-y-8">
             <div className="text-center">
                 <h1 className="text-4xl font-extrabold text-indigo-700">{aircraftData.name || "ULM G70"} Manager</h1>
-                <p className="text-xl text-gray-500 mt-2">Bienvenue, {pilots.find(p => p.isAdmin)?.name || 'Admin'} !</p>
+                <p className="text-xl text-gray-500 mt-2">Bienvenue, {pilots.find(p => p.is_admin)?.name || 'Pilote'} !</p>
             </div>
+
+            {!isConnected && (
+                <div className="text-center p-4 bg-yellow-100 text-yellow-800 border border-yellow-400 rounded-xl">
+                    <p className="font-semibold">Mode Démo : La base de données Supabase n'est pas connectée. Aucune donnée ne sera sauvegardée.</p>
+                </div>
+            )}
 
             {/* Cartes d'Indicateurs Clés */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -784,7 +882,7 @@ const DashboardView = ({ aircraftData, pilots, totalFlightHours, realHourlyCost 
                     color="green"
                 />
                 <PilotCard
-                    icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20v-2c0-.656-.126-1.283-.356-1.857M9 20H4v-2a3 3 0 015-2.828M9 20v-2c0-.656-.126-1.283-.356-1.857m0 0a5.002 5.002 0 019.212 0M9 17v-2m3 2v-2m3 2v-2M12 6V4"></path></svg>}
+                    icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20v-2c0-.656-.126-1.283-.356-1.857m0 0a5.002 5.002 0 019.212 0M9 17v-2m3 2v-2m3 2v-2M12 6V4"></path></svg>}
                     label="Co-propriétaires Enregistrés"
                     value={pilots.length}
                     unit=""
@@ -794,12 +892,10 @@ const DashboardView = ({ aircraftData, pilots, totalFlightHours, realHourlyCost 
 
             {/* Prochaines Réservations */}
             <div className={CardStyle}>
-                <h2 className="text-2xl font-semibold mb-4 text-indigo-700">Prochaines Réservations</h2>
-                {/* Simulation: Afficher les 5 prochaines réservations */}
-                <div className="space-y-3">
-                    {/* Filtre les futures réservations et affiche les 5 premières */}
-                    {/* Placeholder */}
-                    <p className="text-gray-500">Voir la vue "Réservation" pour le calendrier complet.</p>
+                <h2 className="text-2xl font-semibold mb-4 text-indigo-700">Heures de Vol Totales</h2>
+                <div className="p-4 bg-indigo-50 rounded-xl">
+                    <p className="text-sm font-medium text-gray-600">Total cumulé depuis le début :</p>
+                    <p className="text-3xl font-extrabold text-indigo-700 mt-1">{totalFlightHours.toFixed(1)} h</p>
                 </div>
             </div>
         </div>
@@ -813,7 +909,7 @@ const App = () => {
     const [isAuthReady, setIsAuthReady] = useState(false);
     const [userId, setUserId] = useState(null);
     const [isAdmin, setIsAdmin] = useState(false);
-    const [currentPilot, setCurrentPilot] = useState({ name: 'Chargement...', isAdmin: false });
+    const [currentPilot, setCurrentPilot] = useState({ name: 'Chargement...', is_admin: false });
 
     // Données temps réel de la base de données
     const [aircraftData, setAircraftData] = useState({});
@@ -823,140 +919,117 @@ const App = () => {
     const [expenses, setExpenses] = useState([]);
     const [expenseCategories, setExpenseCategories] = useState([]);
 
+    const isConnected = !!supabase;
 
-    // 1. Authentification et Initialisation de l'utilisateur
+    // 1. Authentification Supabase et Initialisation de l'utilisateur
     useEffect(() => {
-        if (!auth) {
-            console.error("Firebase Auth non initialisé.");
+        if (!isConnected) {
+            // Mode démo si Supabase n'est pas initialisé
+            setUserId(crypto.randomUUID());
+            setCurrentPilot({ name: 'Pilote Démo', is_admin: true });
+            setIsAdmin(true);
             setIsAuthReady(true);
             return;
         }
 
-        const setupAuth = async (user) => {
-            let currentUserId = user ? user.uid : crypto.randomUUID();
-            setUserId(currentUserId);
-            
-            if (!db) { // Si la DB n'est pas connectée, nous ne pouvons pas enregistrer le profil
-                setCurrentPilot({ name: 'Utilisateur non enregistré (DB déconnectée)', isAdmin: false });
-                setIsAuthReady(true);
-                return;
+        // Tente de récupérer la session existante ou de se connecter anonymement
+        const checkAuth = async () => {
+            let user = (await supabase.auth.getSession()).data.session?.user;
+
+            if (!user) {
+                // Tente de se connecter anonymement
+                const { data, error } = await supabase.auth.signInAnonymously();
+                if (error) {
+                    console.error("Erreur de connexion anonyme Supabase:", error);
+                    return;
+                }
+                user = data.user;
             }
 
-            // Tente de récupérer ou créer le profil utilisateur
-            const userRef = doc(db, getCollectionPath('co_owners'), currentUserId);
-            const userUnsub = onSnapshot(userRef, async (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    setCurrentPilot(data);
-                    setIsAdmin(data.isAdmin || false);
-                } else {
-                    // Création du profil initial (nom générique pour l'exemple)
-                    const initialData = {
-                        uid: currentUserId,
-                        name: `Pilote-${currentUserId.substring(0, 4)}`,
-                        email: user?.email || 'N/A',
-                        // Le premier utilisateur sera l'admin dans cette version de démo
-                        isAdmin: pilots.length === 0, 
-                        created_at: new Date().toISOString()
-                    };
-                    await setDoc(userRef, initialData);
-                    setCurrentPilot(initialData);
-                    setIsAdmin(initialData.isAdmin);
-                }
-                setIsAuthReady(true);
-            }, (error) => console.error("Erreur de récupération du profil:", error));
-            
-            return () => userUnsub();
+            if (user) {
+                const currentUserId = user.id;
+                setUserId(currentUserId);
+                
+                // Récupération ou création du profil utilisateur
+                const { data: profile, error } = await upsertRecord('co_owners', {
+                    id: currentUserId, // Supabase utilise 'id' comme PK pour les profils
+                    name: `Pilote-${currentUserId.substring(0, 4)}`,
+                    email: user.email || 'N/A',
+                    is_admin: pilots.length === 0, // Le premier utilisateur est admin
+                    created_at: new Date().toISOString()
+                }, 'id');
+
+                const userData = profile?.[0] || { name: `Pilote-${currentUserId.substring(0, 4)}`, is_admin: pilots.length === 0 };
+
+                setCurrentPilot(userData);
+                setIsAdmin(userData.is_admin || false);
+            }
+            setIsAuthReady(true);
         };
 
+        checkAuth();
 
-        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                setupAuth(user);
-            } else if (initialAuthToken) {
-                // Tentative de connexion avec le token fourni par Canvas
-                signInWithCustomToken(auth, initialAuthToken)
-                    .then(({ user }) => setupAuth(user))
-                    .catch(error => {
-                        console.error("Erreur signInWithCustomToken:", error);
-                        signInAnonymously(auth).then(({ user }) => setupAuth(user));
-                    });
-            } else {
-                // Connexion anonyme si aucun token n'est fourni
-                signInAnonymously(auth).then(({ user }) => setupAuth(user));
+        // Écoute des changements d'état d'authentification Supabase
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+            if (session?.user) {
+                checkAuth(); // Re-vérifie le profil
             }
         });
 
-        return () => unsubscribeAuth();
-    }, [initialAuthToken, db, pilots.length]); // Dépend de pilots.length pour initialiser l'admin
+        return () => {
+            authListener?.subscription.unsubscribe();
+        };
 
+    }, [isConnected, pilots.length]); // Dépend de pilots.length pour initialiser l'admin
 
-    // 2. Chargement des données temps réel (onSnapshot)
+    // 2. Chargement des données temps réel (Supabase)
     useEffect(() => {
-        if (!db || !isAuthReady) return;
-
-        const unsubscribeFunctions = [];
+        if (!isConnected || !isAuthReady) return;
 
         // Écouteur ULM (Singleton)
-        const unsubAircraft = onSnapshot(doc(db, getCollectionPath('aircraft'), 'G70'), (docSnap) => {
-            if (docSnap.exists()) {
-                setAircraftData({ ...docSnap.data(), id: 'G70' });
-            } else {
-                // Crée le document initial si inexistant
-                setDoc(doc(db, getCollectionPath('aircraft'), 'G70'), {
+        const fetchAndSubscribeAircraft = async () => {
+            // Récupération initiale de l'ULM
+            await fetchSingleRecord('aircraft', AIRCRAFT_ID, setAircraftData);
+
+            // Création si inexistant (pour la première utilisation)
+            const { data: aircraft } = await supabase.from('aircraft').select('*').eq('id', AIRCRAFT_ID).single();
+            if (!aircraft) {
+                await upsertRecord('aircraft', {
+                    id: AIRCRAFT_ID,
                     name: 'ULM G70',
                     fixed_cost_annual: 4500.0,
                     latest_tach_hour: 0.0
-                });
+                }, 'id');
             }
-        }, (e) => console.error("Erreur aircraft:", e));
-        unsubscribeFunctions.push(unsubAircraft);
+        };
+        fetchAndSubscribeAircraft();
 
-        // Écouteur Pilotes
-        const unsubPilots = onSnapshot(collection(db, getCollectionPath('co_owners')), (snapshot) => {
-            setPilots(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-        }, (e) => console.error("Erreur pilotes:", e));
-        unsubscribeFunctions.push(unsubPilots);
+        const unsubPilots = subscribeToTable('co_owners', setPilots, 'id');
+        const unsubReservations = subscribeToTable('reservations', setReservations);
+        const unsubLogs = subscribeToTable('flight_logs', setFlightLogs);
+        const unsubExpenses = subscribeToTable('expenses', setExpenses);
+        const unsubCategories = subscribeToTable('expense_categories', setExpenseCategories);
 
-        // Écouteur Réservations
-        const qReservations = query(collection(db, getCollectionPath('reservations')));
-        const unsubReservations = onSnapshot(qReservations, (snapshot) => {
-            setReservations(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-        }, (e) => console.error("Erreur réservations:", e));
-        unsubscribeFunctions.push(unsubReservations);
+        // L'écouteur de l'ULM est séparé car il est un singleton
+        const aircraftSubscription = supabase
+            .channel('aircraft_channel')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'aircraft' }, (payload) => {
+                // Mise à jour si l'ULM est affecté
+                if (payload.new.id === AIRCRAFT_ID) {
+                    setAircraftData(payload.new);
+                }
+            })
+            .subscribe();
 
-        // Écouteur Logs de Vol
-        const qLogs = query(collection(db, getCollectionPath('flight_logs')));
-        const unsubLogs = onSnapshot(qLogs, (snapshot) => {
-            setFlightLogs(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-        }, (e) => console.error("Erreur logs:", e));
-        unsubscribeFunctions.push(unsubLogs);
-
-        // Écouteur Dépenses
-        const qExpenses = query(collection(db, getCollectionPath('expenses')));
-        const unsubExpenses = onSnapshot(qExpenses, (snapshot) => {
-            setExpenses(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-        }, (e) => console.error("Erreur dépenses:", e));
-        unsubscribeFunctions.push(unsubExpenses);
-
-        // Écouteur Catégories de Dépenses
-        const qCategories = query(collection(db, getCollectionPath('expense_categories')));
-        const unsubCategories = onSnapshot(qCategories, (snapshot) => {
-            const categories = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-            // Ajout des catégories par défaut
-            const defaultCategories = [
-                { value: 'fuel', label: 'Carburant' },
-                { value: 'maintenance', label: 'Maintenance' },
-                { value: 'fees', label: 'Frais d\'Aérodrome' },
-                { value: 'other', label: 'Autre' },
-            ];
-            setExpenseCategories([...defaultCategories, ...categories]);
-        }, (e) => console.error("Erreur catégories:", e));
-        unsubscribeFunctions.push(unsubCategories);
-
-
-        return () => unsubscribeFunctions.forEach(unsub => unsub());
-    }, [db, isAuthReady, userId]);
+        return () => {
+            unsubPilots();
+            unsubReservations();
+            unsubLogs();
+            unsubExpenses();
+            unsubCategories();
+            supabase.removeChannel(aircraftSubscription);
+        };
+    }, [isConnected, isAuthReady, userId]);
 
     // Calcul du Coût Horaire et des Heures Totales
     const totalFlightHours = useMemo(() =>
@@ -984,21 +1057,14 @@ const App = () => {
         if (!isAuthReady) {
             return <div className="text-center p-20 text-indigo-600 font-semibold">Chargement de l'Authentification...</div>;
         }
-        
-        // AFFICHAGE DU MESSAGE D'ERREUR SI LA BASE DE DONNÉES EST DÉCONNECTÉE
-        if (!db) {
-            return (
-                <div className="text-center p-10 m-8 bg-red-100 text-red-800 border-4 border-red-400 rounded-2xl">
-                    <h2 className="text-2xl font-bold mb-3">⚠️ Base de Données Non Connectée</h2>
-                    <p>L'application est configurée pour Firestore, mais les variables de connexion sont manquantes.</p>
-                    <p className="mt-2 font-medium">
-                        Pour activer la persistance et le temps réel : <br/>
-                        1. Assurez-vous d'avoir configuré le projet **Firebase/Firestore** (voir les instructions du README).<br/>
-                        2. Si vous utilisez **Supabase**, une réécriture complète de la couche de données (Remplacement des fonctions `doc`, `onSnapshot`, `addDoc` par les équivalents Supabase) est nécessaire.
-                    </p>
-                </div>
-            );
-        }
+
+        const allCategories = [
+            { value: 'fuel', label: 'Carburant' },
+            { value: 'maintenance', label: 'Maintenance' },
+            { value: 'fees', label: 'Frais d\'Aérodrome' },
+            { value: 'other', label: 'Autre' },
+            ...expenseCategories
+        ];
 
         switch (page) {
             case 'dashboard':
@@ -1007,11 +1073,11 @@ const App = () => {
                     pilots={pilots}
                     totalFlightHours={totalFlightHours}
                     realHourlyCost={realHourlyCost}
+                    isConnected={isConnected}
                 />;
             case 'reserve':
                 return <ReserveView
                     userId={userId}
-                    db={db}
                     pilots={pilots}
                     reservations={reservations}
                     currentPilot={currentPilot}
@@ -1019,7 +1085,6 @@ const App = () => {
             case 'log-flight':
                 return <LogFlightView
                     userId={userId}
-                    db={db}
                     pilots={pilots}
                     aircraftData={aircraftData}
                 />;
@@ -1035,10 +1100,8 @@ const App = () => {
                 return <AdminView
                     pilots={pilots}
                     aircraftData={aircraftData}
-                    expenseCategories={expenseCategories}
-                    db={db}
-                    userId={userId}
-                    appId={appId}
+                    expenseCategories={allCategories}
+                    currentUserId={userId}
                 />;
             default:
                 return <DashboardView />;
@@ -1063,7 +1126,6 @@ const App = () => {
                     <div className="flex justify-between h-16">
                         <div className="flex items-center">
                             <span className="text-2xl font-bold text-indigo-600">ULM G70</span>
-                            <span className="hidden sm:inline text-xs ml-2 text-gray-400">ID App: {appId.substring(0, 8)}...</span>
                         </div>
                         <div className="flex space-x-2 sm:space-x-4">
                             {navItems.map((item) => (

@@ -42,7 +42,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
     // Simulation de l'ajout d'un pilote
     const handleAddPilot = async (e) => {
         e.preventDefault();
-        if (!newPilotEmail || !newPilotName) return;
+        if (!newPilotEmail || !newPilotName || !db) return alert("Erreur: Base de données non connectée.");
 
         // Dans un environnement réel, ceci créerait un utilisateur Supabase/Firebase Auth.
         // Ici, nous simulons l'ajout à la liste des co-propriétaires
@@ -65,7 +65,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
     // Ajout d'une catégorie de dépense
     const handleAddCategory = async (e) => {
         e.preventDefault();
-        if (!newCategoryName) return;
+        if (!newCategoryName || !db) return alert("Erreur: Base de données non connectée.");
 
         const newCat = {
             value: newCategoryName.toLowerCase().replace(/\s/g, '_'),
@@ -80,6 +80,8 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, db, userId, appId,
     // Mise à jour des coûts fixes de l'ULM
     const handleUpdateAircraft = async (e) => {
         e.preventDefault();
+        if (!db) return alert("Erreur: Base de données non connectée.");
+        
         const aircraftRef = doc(db, getCollectionPath('aircraft'), 'G70');
         await setDoc(aircraftRef, {
             name: aircraftData.name,
@@ -210,7 +212,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, db, expenseCategories, onAdd
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!date || !amount || !description) return;
+        if (!date || !amount || !description || !db) return alert("Erreur: Base de données non connectée.");
 
         const newExpense = {
             date: date,
@@ -415,6 +417,8 @@ const LogFlightView = ({ userId, db, pilots, aircraftData, onLog }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!db) return alert("Erreur: Base de données non connectée.");
+        
         const endHours = parseFloat(endTachHours);
         const fuel = parseFloat(fuelCost);
 
@@ -627,6 +631,7 @@ const ReserveView = ({ userId, db, pilots, reservations, currentPilot, onAdd }) 
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!db) return alert("Erreur: Base de données non connectée.");
 
         const reservationStart = new Date(`${selectedDate}T${startTime}:00`);
         const reservationEnd = new Date(`${selectedDate}T${endTime}:00`);
@@ -830,6 +835,12 @@ const App = () => {
         const setupAuth = async (user) => {
             let currentUserId = user ? user.uid : crypto.randomUUID();
             setUserId(currentUserId);
+            
+            if (!db) { // Si la DB n'est pas connectée, nous ne pouvons pas enregistrer le profil
+                setCurrentPilot({ name: 'Utilisateur non enregistré (DB déconnectée)', isAdmin: false });
+                setIsAuthReady(true);
+                return;
+            }
 
             // Tente de récupérer ou créer le profil utilisateur
             const userRef = doc(db, getCollectionPath('co_owners'), currentUserId);
@@ -973,6 +984,21 @@ const App = () => {
         if (!isAuthReady) {
             return <div className="text-center p-20 text-indigo-600 font-semibold">Chargement de l'Authentification...</div>;
         }
+        
+        // AFFICHAGE DU MESSAGE D'ERREUR SI LA BASE DE DONNÉES EST DÉCONNECTÉE
+        if (!db) {
+            return (
+                <div className="text-center p-10 m-8 bg-red-100 text-red-800 border-4 border-red-400 rounded-2xl">
+                    <h2 className="text-2xl font-bold mb-3">⚠️ Base de Données Non Connectée</h2>
+                    <p>L'application est configurée pour Firestore, mais les variables de connexion sont manquantes.</p>
+                    <p className="mt-2 font-medium">
+                        Pour activer la persistance et le temps réel : <br/>
+                        1. Assurez-vous d'avoir configuré le projet **Firebase/Firestore** (voir les instructions du README).<br/>
+                        2. Si vous utilisez **Supabase**, une réécriture complète de la couche de données (Remplacement des fonctions `doc`, `onSnapshot`, `addDoc` par les équivalents Supabase) est nécessaire.
+                    </p>
+                </div>
+            );
+        }
 
         switch (page) {
             case 'dashboard':
@@ -1075,4 +1101,3 @@ const App = () => {
 };
 
 export default App;
-

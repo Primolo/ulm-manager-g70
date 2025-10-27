@@ -21,18 +21,25 @@
     <!-- Chargement de Babel pour compiler le JSX directement dans le navigateur -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
+    <!-- NOUVEAU: Chargement du client Supabase (Version UMD globale) -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase-js.min.js"></script>
+
     <!-- Code de l'application ULM_Manager.jsx (maintenant intégré) -->
     <script type="text/babel">
-        import React, { useState, useEffect, useCallback, useMemo } from 'react';
-        // Utilisation du client Supabase via CDN
-        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+        // NOTE: Les imports ont été supprimés pour la compatibilité Babel Standalone.
+        // Nous utilisons les variables globales React et window.supabase.
+
+        // Destructuration globale pour la clarté (remplace les imports de React)
+        const { useState, useEffect, useCallback, useMemo } = React;
+        // Fix: Accès direct à la fonction createClient exposée globalement par le CDN Supabase
+        const createClient = window.supabase.createClient;
 
         // Configuration Supabase
         const supabaseUrl = typeof VITE_SUPABASE_URL !== 'undefined' ? VITE_SUPABASE_URL : null;
         const supabaseAnonKey = typeof VITE_SUPABASE_ANON_KEY !== 'undefined' ? VITE_SUPABASE_ANON_KEY : null;
 
         // Initialisation du client Supabase
-        const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
+        const supabaseClient = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
         // Identifiant d'application par défaut pour les tables publiques
         const AIRCRAFT_ID = 'G70'; // ID fixe pour l'ULM unique
@@ -81,7 +88,7 @@
         // --- FONCTIONS SUPABASE/DEMO POUR LE TEMPS RÉEL ET CRUD ---
 
         const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
-            if (!supabase) {
+            if (!supabaseClient) {
                 // --- MODE DÉMO ---
                 const demoData = demoDataStore[tableName];
                 if (tableName === 'aircraft') {
@@ -104,7 +111,7 @@
 
             // --- MODE SUPABASE ---
             const fetchInitialData = async () => {
-                const { data, error } = await supabase
+                const { data, error } = await supabaseClient
                     .from(tableName)
                     .select('*');
 
@@ -117,7 +124,7 @@
 
             fetchInitialData();
 
-            const subscription = supabase
+            const subscription = supabaseClient
                 .channel(tableName)
                 .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
                     fetchInitialData();
@@ -125,12 +132,12 @@
                 .subscribe();
 
             return () => {
-                supabase.removeChannel(subscription);
+                supabaseClient.removeChannel(subscription);
             };
         };
 
         const upsertRecord = async (tableName, recordData, primaryKeyField = 'id') => {
-            if (!supabase) {
+            if (!supabaseClient) {
                 // --- MODE DÉMO PERSISTANT ---
                 let store = { ...demoDataStore };
                 const key = tableName;
@@ -150,7 +157,7 @@
             }
 
             // --- MODE SUPABASE ---
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
                 .from(tableName)
                 .upsert(recordData)
                 .select()
@@ -163,7 +170,7 @@
         };
 
         const insertRecord = async (tableName, recordData) => {
-            if (!supabase) {
+            if (!supabaseClient) {
                 // --- MODE DÉMO PERSISTANT ---
                 let store = { ...demoDataStore };
                 const key = tableName;
@@ -174,7 +181,7 @@
             }
 
             // --- MODE SUPABASE ---
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
                 .from(tableName)
                 .insert(recordData)
                 .select()
@@ -201,7 +208,7 @@
                 setLoading(true);
                 setMessage('');
 
-                if (!supabase) {
+                if (!supabaseClient) {
                     setMessage("Erreur: Le client Supabase n'est pas configuré. Veuillez vérifier les variables d'environnement.");
                     setLoading(false);
                     return;
@@ -210,9 +217,9 @@
                 let authResponse;
                 
                 if (isSignUp) {
-                    authResponse = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+                    authResponse = await supabaseClient.auth.signUp({ email, password, options: { data: { name } } });
                 } else {
-                    authResponse = await supabase.auth.signInWithPassword({ email, password });
+                    authResponse = await supabaseClient.auth.signInWithPassword({ email, password });
                 }
 
                 setLoading(false);
@@ -336,7 +343,7 @@
         const App = () => {
             // Initialisation du mode démo
             useEffect(() => {
-                if (!supabase) {
+                if (!supabaseClient) {
                     loadDemoData();
                 }
             }, []);
@@ -360,20 +367,20 @@
             
             // --- LOGIQUE D'AUTHENTIFICATION SUPABASE ---
             useEffect(() => {
-                if (!supabase) {
+                if (!supabaseClient) {
                     setAuthLoading(false); 
                     return;
                 }
 
                 // Initialiser la session et écouter les changements
-                const { data: authListener } = supabase.auth.onAuthStateChange(
+                const { data: authListener } = supabaseClient.auth.onAuthStateChange(
                     (event, currentSession) => {
                         setSession(currentSession);
                         setAuthLoading(false);
                     }
                 );
 
-                supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+                supabaseClient.auth.getSession().then(({ data: { session: initialSession } }) => {
                     setSession(initialSession);
                     setAuthLoading(false);
                 });
@@ -387,7 +394,7 @@
             // --- LOGIQUE DE CHARGEMENT DES DONNÉES EN TEMPS RÉEL ---
             useEffect(() => {
                 // Charger les données si l'utilisateur est connecté OU si nous sommes en mode démo
-                if (!supabase || userId) { 
+                if (!supabaseClient || userId) { 
                     const unsubPilots = subscribeToTable('co_owners', setPilots, 'uid');
                     const unsubAircraft = subscribeToTable('aircraft', setAircraft, 'id');
                     const unsubReservations = subscribeToTable('reservations', setReservations);
@@ -404,11 +411,11 @@
                         unsubCategories();
                     };
                 }
-            }, [userId, supabase]);
+            }, [userId, supabaseClient]);
 
             // --- RENDU BASÉ SUR L'AUTHENTIFICATION ET LE MODE DÉMO ---
 
-            if (!supabase) {
+            if (!supabaseClient) {
                 // RENDU MODE DÉMO PERSISTANT LOCAL (Pas besoin de se loguer)
                 return (
                     <div className="font-sans min-h-screen bg-gray-50 flex flex-col">
@@ -451,8 +458,8 @@
         // Composant Header (Barre de navigation)
         const Header = ({ setView, currentView, isAdmin, setSession }) => {
             const handleLogout = async () => {
-                if (supabase) {
-                    await supabase.auth.signOut();
+                if (supabaseClient) {
+                    await supabaseClient.auth.signOut();
                     setSession(null);
                 } else {
                     // En mode démo, on simule la déconnexion en réinitialisant le localStorage

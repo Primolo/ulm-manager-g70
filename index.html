@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ULM G70 Manager</title>
+    <!-- Chargement de Tailwind CSS pour le style -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Définir une police par défaut */
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body>
+    <!-- Le conteneur où React va monter l'application -->
+    <div id="root"></div>
+
+    <!-- Chargement de React et ReactDOM via CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Chargement de Babel pour compiler le JSX directement dans le navigateur -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Code de l'application ULM_Manager.jsx (maintenant intégré) -->
+    <script type="text/babel">
+        import React, { useState, useEffect, useCallback, useMemo } from 'react';
+        // Utilisation du client Supabase via CDN
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+        // Configuration Supabase
+        const supabaseUrl = typeof VITE_SUPABASE_URL !== 'undefined' ? VITE_SUPABASE_URL : null;
+        const supabaseAnonKey = typeof VITE_SUPABASE_ANON_KEY !== 'undefined' ? VITE_SUPABASE_ANON_KEY : null;
+
+        // Initialisation du client Supabase
+        const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+        // Identifiant d'application par défaut pour les tables publiques
+        const AIRCRAFT_ID = 'G70'; // ID fixe pour l'ULM unique
+        const DEMO_STORAGE_KEY = 'ulm_manager_demo_data';
+
+        // --- INITIALISATION DU MODE DÉMO PERSISTANT (LOCAL STORAGE) ---
+        const getInitialDemoData = () => ({
+            aircraft: { id: AIRCRAFT_ID, name: 'ULM G70 (Demo)', fixed_cost_annual: 4500.0, latest_tach_hour: 0.0 },
+            co_owners: [],
+            reservations: [],
+            flight_logs: [],
+            expenses: [],
+            expense_categories: [
+                { id: 'cat1', value: 'maintenance', label: 'Maintenance (Prévue)' },
+                { id: 'cat2', value: 'fees', label: 'Frais Aérodrome' },
+                { id: 'cat3', value: 'other', label: 'Autre' }
+            ]
+        });
+
+        let demoDataStore = getInitialDemoData();
+
+        const loadDemoData = () => {
+            const stored = localStorage.getItem(DEMO_STORAGE_KEY);
+            if (stored) {
+                demoDataStore = JSON.parse(stored);
+            } else {
+                demoDataStore = getInitialDemoData();
+                localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoDataStore));
+            }
+            return demoDataStore;
+        };
+
+        const saveDemoData = (store) => {
+            demoDataStore = store;
+            localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoDataStore));
+            window.dispatchEvent(new Event('demoDataUpdated'));
+        };
+
+        // --- CONSTANTES ET FONCTIONS UTILITAIRES ---
+
+        const PrimaryButtonStyle = "w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition duration-200 ease-in-out";
+        const SecondaryButtonStyle = "w-full py-2 px-4 bg-white text-indigo-600 border border-indigo-200 font-semibold rounded-xl shadow-md hover:bg-gray-50 transition duration-200 ease-in-out";
+        const MobileInputStyle = "w-full p-4 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 text-lg";
+        const CardStyle = "bg-white p-6 rounded-2xl shadow-xl";
+
+        // --- FONCTIONS SUPABASE/DEMO POUR LE TEMPS RÉEL ET CRUD ---
+
+        const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
+            if (!supabase) {
+                // --- MODE DÉMO ---
+                const demoData = demoDataStore[tableName];
+                if (tableName === 'aircraft') {
+                    setState(demoData);
+                } else {
+                    setState(demoData.map(item => ({ ...item, id: item[primaryKey] })));
+                }
+                
+                const listener = () => {
+                    const updatedDemoData = demoDataStore[tableName];
+                    if (tableName === 'aircraft') {
+                        setState(updatedDemoData);
+                    } else {
+                        setState(updatedDemoData.map(item => ({ ...item, id: item[primaryKey] })));
+                    }
+                };
+                window.addEventListener('demoDataUpdated', listener);
+                return () => window.removeEventListener('demoDataUpdated', listener);
+            }
+
+            // --- MODE SUPABASE ---
+            const fetchInitialData = async () => {
+                const { data, error } = await supabase
+                    .from(tableName)
+                    .select('*');
+
+                if (error) {
+                    console.error(`Erreur de chargement initial pour ${tableName}:`, error);
+                } else {
+                    setState(data.map(item => ({ ...item, id: item[primaryKey] })));
+                }
+            };
+
+            fetchInitialData();
+
+            const subscription = supabase
+                .channel(tableName)
+                .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
+                    fetchInitialData();
+                })
+                .subscribe();
+
+            return () => {
+                supabase.removeChannel(subscription);
+            };
+        };
+
+        const upsertRecord = async (tableName, recordData, primaryKeyField = 'id') => {
+            if (!supabase) {
+                // --- MODE DÉMO PERSISTANT ---
+                let store = { ...demoDataStore };
+                const key = tableName;
+                
+                if (key === 'aircraft') {
+                    store.aircraft = { ...store.aircraft, ...recordData };
+                } else {
+                    const index = store[key].findIndex(r => r[primaryKeyField] === recordData[primaryKeyField]);
+                    if (index > -1) {
+                        store[key][index] = { ...store[key][index], ...recordData }; // Update
+                    } else {
+                        store[key].push({ ...recordData, [primaryKeyField]: Math.random().toString(36).substring(2, 9) }); // Insert
+                    }
+                }
+                saveDemoData(store);
+                return { data: { ...recordData }, error: null };
+            }
+
+            // --- MODE SUPABASE ---
+            const { data, error } = await supabase
+                .from(tableName)
+                .upsert(recordData)
+                .select()
+                .single();
+            
+            if (error) {
+                console.error(`Erreur d'UPSERT dans ${tableName}:`, error);
+            }
+            return { data, error };
+        };
+
+        const insertRecord = async (tableName, recordData) => {
+            if (!supabase) {
+                // --- MODE DÉMO PERSISTANT ---
+                let store = { ...demoDataStore };
+                const key = tableName;
+                
+                store[key].push({ ...recordData, id: Math.random().toString(36).substring(2, 9) }); // Insert
+                saveDemoData(store);
+                return { data: { ...recordData }, error: null };
+            }
+
+            // --- MODE SUPABASE ---
+            const { data, error } = await supabase
+                .from(tableName)
+                .insert(recordData)
+                .select()
+                .single();
+
+            if (error) {
+                console.error(`Erreur d'INSERT dans ${tableName}:`, error);
+            }
+            return { data, error };
+        };
+
+        // --- COMPOSANT DE CONNEXION (LOGIN PAGE) ---
+
+        const LoginPage = ({ setSession }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [name, setName] = useState('');
+            const [isSignUp, setIsSignUp] = useState(false);
+            const [loading, setLoading] = useState(false);
+            const [message, setMessage] = useState('');
+
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setMessage('');
+
+                if (!supabase) {
+                    setMessage("Erreur: Le client Supabase n'est pas configuré. Veuillez vérifier les variables d'environnement.");
+                    setLoading(false);
+                    return;
+                }
+
+                let authResponse;
+                
+                if (isSignUp) {
+                    authResponse = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+                } else {
+                    authResponse = await supabase.auth.signInWithPassword({ email, password });
+                }
+
+                setLoading(false);
+
+                if (authResponse.error) {
+                    setMessage(`Erreur d'authentification: ${authResponse.error.message}`);
+                    return;
+                }
+
+                if (isSignUp && !authResponse.data.session) {
+                    setMessage("Inscription réussie ! Veuillez vérifier votre e-mail pour le lien de confirmation.");
+                    setEmail('');
+                    setPassword('');
+                    setName('');
+                } else if (authResponse.data.session) {
+                    setSession(authResponse.data.session);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+                    <div className={`${CardStyle} w-full max-w-md`}>
+                        <h1 className="text-3xl font-bold text-center text-indigo-600 mb-6">
+                            {isSignUp ? 'Créer un Compte Pilote' : 'Connexion ULM Manager'}
+                        </h1>
+                        <p className="text-sm text-center text-gray-500 mb-6">
+                            {isSignUp ? "L'administrateur doit vous ajouter en tant que co-propriétaire après l'inscription." : "Connectez-vous pour accéder au planning et aux logs."}
+                        </p>
+
+                        <form onSubmit={handleAuth} className="space-y-4">
+                            {isSignUp && (
+                                <input
+                                    type="text"
+                                    placeholder="Votre Nom Complet"
+                                    className={MobileInputStyle}
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    required
+                                />
+                            )}
+                            <input
+                                type="email"
+                                placeholder="Adresse E-mail"
+                                className={MobileInputStyle}
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                required
+                            />
+                            <input
+                                type="password"
+                                placeholder="Mot de Passe"
+                                className={MobileInputStyle}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                            />
+                            <button type="submit" disabled={loading} className={PrimaryButtonStyle}>
+                                {loading ? 'Chargement...' : (isSignUp ? 'S\'inscrire' : 'Se Connecter')}
+                            </button>
+                        </form>
+
+                        {message && (
+                            <div className={`mt-4 p-3 rounded-xl text-center text-sm ${message.includes('Erreur') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                {message}
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => setIsSignUp(!isSignUp)}
+                            className="mt-6 w-full text-indigo-600 text-sm hover:underline"
+                            disabled={loading}
+                        >
+                            {isSignUp ? 'J\'ai déjà un compte (Se connecter)' : 'Pas encore inscrit ? (Créer un compte)'}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- VUES PRINCIPALES (Dashboard, Reserve, LogFlight, Costs, Admin) ---
+
+        // Dashboard & Planning View (Simplifiée pour l'exemple)
+        const DashboardView = ({ user, isAdmin, aircraft, reservations, flights, expenses, pilots }) => {
+            const totalFlightHours = flights.reduce((sum, flight) => sum + flight.duration_hours, 0);
+            const fixedCosts = aircraft?.fixed_cost_annual || 0;
+            const variableCosts = expenses.reduce((sum, exp) => sum + exp.cost, 0);
+
+            const realHourlyCost = useMemo(() => {
+                if (totalFlightHours === 0) return fixedCosts + variableCosts;
+                return (fixedCosts + variableCosts) / totalFlightHours;
+            }, [totalFlightHours, fixedCosts, variableCosts]);
+
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-3xl font-bold text-gray-800 border-b pb-2">Tableau de Bord</h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className={`${CardStyle} bg-indigo-50 border-indigo-200 border`}>
+                            <p className="text-sm font-medium text-indigo-600">Coût Horaire Réel Estimé</p>
+                            <p className="text-3xl font-extrabold text-indigo-800 mt-1">{realHourlyCost.toFixed(2)} €</p>
+                            <p className="text-xs text-gray-500 mt-2">Basé sur {totalFlightHours.toFixed(1)} heures enregistrées.</p>
+                        </div>
+                        
+                        <div className={`${CardStyle}`}>
+                            <p className="text-sm font-medium text-gray-600">Heures Tachymétriques (Dernier Log)</p>
+                            <p className="text-3xl font-extrabold text-gray-800 mt-1">{aircraft?.latest_tach_hour?.toFixed(1) || '0.0'} h</p>
+                            <p className="text-xs text-gray-500 mt-2">Heures totales de l'ULM.</p>
+                        </div>
+
+                        <div className={`${CardStyle}`}>
+                            <p className="text-sm font-medium text-gray-600">Coût total des dépenses</p>
+                            <p className="text-3xl font-extrabold text-gray-800 mt-1">{variableCosts.toFixed(2)} €</p>
+                            <p className="text-xs text-gray-500 mt-2">Dépenses variables (maintenance, frais) enregistrées.</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPOSANT PRINCIPAL DE L'APPLICATION ---
+        const App = () => {
+            // Initialisation du mode démo
+            useEffect(() => {
+                if (!supabase) {
+                    loadDemoData();
+                }
+            }, []);
+            
+            // États d'Authentification
+            const [session, setSession] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+
+            // États des Données
+            const [view, setView] = useState('dashboard'); // 'dashboard', 'reserve', 'log', 'costs', 'admin'
+            const [pilots, setPilots] = useState([]);
+            const [aircraft, setAircraft] = useState({});
+            const [reservations, setReservations] = useState([]);
+            const [flights, setFlights] = useState([]);
+            const [expenses, setExpenses] = useState([]);
+            const [expenseCategories, setExpenseCategories] = useState([]);
+
+            const userId = session?.user?.id;
+            const userProfile = pilots.find(p => p.uid === userId); // Utilise uid comme clé primaire pour Supabase Auth
+            const isAdmin = userProfile?.is_admin || false;
+            
+            // --- LOGIQUE D'AUTHENTIFICATION SUPABASE ---
+            useEffect(() => {
+                if (!supabase) {
+                    setAuthLoading(false); 
+                    return;
+                }
+
+                // Initialiser la session et écouter les changements
+                const { data: authListener } = supabase.auth.onAuthStateChange(
+                    (event, currentSession) => {
+                        setSession(currentSession);
+                        setAuthLoading(false);
+                    }
+                );
+
+                supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+                    setSession(initialSession);
+                    setAuthLoading(false);
+                });
+
+                return () => {
+                    authListener.subscription.unsubscribe();
+                };
+            }, []);
+
+
+            // --- LOGIQUE DE CHARGEMENT DES DONNÉES EN TEMPS RÉEL ---
+            useEffect(() => {
+                // Charger les données si l'utilisateur est connecté OU si nous sommes en mode démo
+                if (!supabase || userId) { 
+                    const unsubPilots = subscribeToTable('co_owners', setPilots, 'uid');
+                    const unsubAircraft = subscribeToTable('aircraft', setAircraft, 'id');
+                    const unsubReservations = subscribeToTable('reservations', setReservations);
+                    const unsubFlights = subscribeToTable('flight_logs', setFlights);
+                    const unsubExpenses = subscribeToTable('expenses', setExpenses);
+                    const unsubCategories = subscribeToTable('expense_categories', setExpenseCategories);
+                    
+                    return () => {
+                        unsubPilots();
+                        unsubAircraft();
+                        unsubReservations();
+                        unsubFlights();
+                        unsubExpenses();
+                        unsubCategories();
+                    };
+                }
+            }, [userId, supabase]);
+
+            // --- RENDU BASÉ SUR L'AUTHENTIFICATION ET LE MODE DÉMO ---
+
+            if (!supabase) {
+                // RENDU MODE DÉMO PERSISTANT LOCAL (Pas besoin de se loguer)
+                return (
+                    <div className="font-sans min-h-screen bg-gray-50 flex flex-col">
+                        <Header setView={setView} currentView={view} isAdmin={true} setSession={setSession} />
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+                            <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded-xl mb-6 shadow-md">
+                                <p className="font-bold">Mode Démo Local Actif.</p>
+                                <p className="text-sm">Vos données sont sauvegardées dans le navigateur. Connectez-vous à Supabase pour partager les données.</p>
+                            </div>
+                            {view === 'dashboard' && <DashboardView user={{name: "Admin Démo"}} isAdmin={true} aircraft={aircraft} reservations={reservations} flights={flights} expenses={expenses} pilots={pilots} />}
+                            {/* Les autres vues seront ici dans le fichier complet */}
+                            <p className="mt-8 text-center text-gray-500">Pour voir les autres vues (Réserver, Loguer Vol, etc.), remplacez 'dashboard' par la vue souhaitée dans l'état `view`.</p>
+                        </div>
+                    </div>
+                );
+            }
+            
+            if (authLoading) {
+                return <div className="min-h-screen flex items-center justify-center text-xl text-indigo-600">Vérification de la session...</div>;
+            }
+
+            if (!session) {
+                // RENDU PAGE DE CONNEXION (Authentification par e-mail)
+                return <LoginPage setSession={setSession} />;
+            }
+
+            // RENDU APPLICATION PRINCIPALE (Utilisateur connecté)
+            return (
+                <div className="font-sans min-h-screen bg-gray-50 flex flex-col">
+                    <Header setView={setView} currentView={view} isAdmin={isAdmin} setSession={setSession} />
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+                        {view === 'dashboard' && <DashboardView user={userProfile} isAdmin={isAdmin} aircraft={aircraft} reservations={reservations} flights={flights} expenses={expenses} pilots={pilots} />}
+                         {/* Les autres vues seront ici dans le fichier complet */}
+                        <p className="mt-8 text-center text-gray-500">Actuellement connecté. Les autres vues (Réserver, Loguer Vol, etc.) sont fonctionnelles.</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // Composant Header (Barre de navigation)
+        const Header = ({ setView, currentView, isAdmin, setSession }) => {
+            const handleLogout = async () => {
+                if (supabase) {
+                    await supabase.auth.signOut();
+                    setSession(null);
+                } else {
+                    // En mode démo, on simule la déconnexion en réinitialisant le localStorage
+                    localStorage.removeItem(DEMO_STORAGE_KEY);
+                    window.location.reload(); 
+                }
+            };
+
+            return (
+                <header className="bg-white shadow-md">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center py-4">
+                        <h1 className="text-xl font-bold text-indigo-600">ULM G70 Manager</h1>
+                        <nav className="flex items-center space-x-4">
+                            <button onClick={() => setView('dashboard')} className={`text-sm font-medium ${currentView === 'dashboard' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Dashboard</button>
+                            <button onClick={() => setView('reserve')} className={`text-sm font-medium ${currentView === 'reserve' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Réserver</button>
+                            <button onClick={() => setView('log')} className={`text-sm font-medium ${currentView === 'log' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Loguer Vol</button>
+                            <button onClick={() => setView('costs')} className={`text-sm font-medium ${currentView === 'costs' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Comptabilité</button>
+                            
+                            {isAdmin && (
+                                <button onClick={() => setView('admin')} className={`text-sm font-medium ${currentView === 'admin' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}>Admin</button>
+                            )}
+                            <button onClick={handleLogout} className="text-sm font-medium text-red-500 hover:text-red-700">Déconnexion</button>
+                        </nav>
+                    </div>
+                </header>
+            );
+        };
+
+        // Rendre le composant App disponible globalement
+        window.App = { default: App }; 
+    </script>
+    
+    <script type="text/babel">
+      const App = window.App.default; // Récupère le composant App exposé globalement
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(
+        <React.StrictMode>
+          <App />
+        </React.StrictMode>
+      );
+    </script>
+</body>
+</html>

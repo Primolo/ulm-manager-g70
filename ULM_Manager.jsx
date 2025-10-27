@@ -14,6 +14,43 @@ const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, su
 // Identifiant d'application par défaut pour les tables publiques (utilisé ici pour le schéma Supabase)
 const appId = 'ulm-manager-default-id';
 const AIRCRAFT_ID = 'G70'; // ID fixe pour l'ULM unique
+const DEMO_STORAGE_KEY = 'ulm_manager_demo_data';
+
+// Initialisation des données de démo par défaut
+const getInitialDemoData = () => ({
+    aircraft: { id: AIRCRAFT_ID, name: 'ULM G70 (Demo)', fixed_cost_annual: 4500.0, latest_tach_hour: 0.0 },
+    co_owners: [],
+    reservations: [],
+    flight_logs: [],
+    expenses: [],
+    expense_categories: [
+        { id: '1', value: 'maintenance', label: 'Maintenance (Prévue)' },
+        { id: '2', value: 'fees', label: 'Frais Aérodrome' },
+        { id: '3', value: 'other', label: 'Autre' }
+    ]
+});
+
+// Gère la persistance locale du mode démo
+let demoDataStore = getInitialDemoData();
+
+const loadDemoData = () => {
+    const stored = localStorage.getItem(DEMO_STORAGE_KEY);
+    if (stored) {
+        demoDataStore = JSON.parse(stored);
+    } else {
+        demoDataStore = getInitialDemoData();
+        localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoDataStore));
+    }
+    return demoDataStore;
+};
+
+const saveDemoData = (store) => {
+    demoDataStore = store;
+    localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoDataStore));
+    // Dispatch un événement pour forcer la mise à jour des états React
+    window.dispatchEvent(new Event('demoDataUpdated'));
+};
+
 
 // --- CONSTANTES ET FONCTIONS UTILITAIRES ---
 
@@ -23,12 +60,34 @@ const SecondaryButtonStyle = "w-full py-2 px-4 bg-white text-indigo-600 border b
 const MobileInputStyle = "w-full p-4 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 text-lg";
 const CardStyle = "bg-white p-6 rounded-2xl shadow-xl";
 
-// --- FONCTIONS SUPABASE POUR LE TEMPS RÉEL ET CRUD ---
+// --- FONCTIONS SUPABASE/DEMO POUR LE TEMPS RÉEL ET CRUD ---
 
 // Écoute en temps réel d'une table Supabase
 const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
-    if (!supabase) return () => {};
+    if (!supabase) {
+        // --- MODE DÉMO ---
+        const demoData = demoDataStore[tableName];
+        if (tableName === 'aircraft') {
+            setState(demoData); // Aircraft est un objet
+        } else {
+            setState(demoData.map(item => ({ ...item, id: item[primaryKey] })));
+        }
+        
+        // Écouteur d'événement global pour les mises à jour en mode démo
+        const listener = () => {
+            const updatedDemoData = demoDataStore[tableName];
+            if (tableName === 'aircraft') {
+                setState(updatedDemoData);
+            } else {
+                setState(updatedDemoData.map(item => ({ ...item, id: item[primaryKey] })));
+            }
+        };
+        window.addEventListener('demoDataUpdated', listener);
+        return () => window.removeEventListener('demoDataUpdated', listener);
+    }
 
+    // --- MODE SUPABASE ---
+    // (Logique inchangée pour Supabase)
     // Fonction de récupération initiale
     const fetchInitialData = async () => {
         const { data, error } = await supabase
@@ -60,7 +119,15 @@ const subscribeToTable = (tableName, setState, primaryKey = 'id') => {
 
 // Récupère une seule entrée (pour l'ULM et l'utilisateur)
 const fetchSingleRecord = async (tableName, recordId, setState) => {
-    if (!supabase) return;
+    if (!supabase) {
+         // --- MODE DÉMO ---
+         if (tableName === 'aircraft') {
+            setState(demoDataStore.aircraft);
+         }
+         return;
+    }
+
+    // --- MODE SUPABASE ---
     const { data, error } = await supabase
         .from(tableName)
         .select('*')
@@ -76,7 +143,27 @@ const fetchSingleRecord = async (tableName, recordId, setState) => {
 
 // Mise à jour ou insertion
 const upsertRecord = async (tableName, recordData, primaryKeyField = 'id') => {
-    if (!supabase) return { error: { message: "Supabase non connecté." } };
+    if (!supabase) {
+        // --- SCÉNARIO MODE DÉMO (GRATUIT) ---
+        console.warn(`MODE DÉMO: Tentative d'UPSERT local dans la table ${tableName}.`);
+        
+        let store = { ...demoDataStore };
+        const key = tableName;
+
+        if (key === 'aircraft') {
+            store.aircraft = { ...store.aircraft, ...recordData };
+        } else {
+             // Ceci ne gère pas correctement les collections array en mode démo,
+             // mais la seule collection array que nous upsert est gérée par insertRecord (co_owners).
+             // Pour l'ULM, c'est un upsert simple qui est géré ci-dessus.
+             console.error("UPSERT sur collection array non supporté en mode démo.");
+        }
+        
+        saveDemoData(store);
+        return { data: [recordData], error: null };
+    }
+    
+    // --- MODE SUPABASE ---
     const { data, error } = await supabase
         .from(tableName)
         .upsert(recordData, { onConflict: primaryKeyField })
@@ -86,7 +173,27 @@ const upsertRecord = async (tableName, recordData, primaryKeyField = 'id') => {
 
 // Insertion
 const insertRecord = async (tableName, recordData) => {
-    if (!supabase) return { error: { message: "Supabase non connecté." } };
+    if (!supabase) {
+        // --- SCÉNARIO MODE DÉMO (GRATUIT) ---
+        console.warn(`MODE DÉMO: Tentative d'INSERT local dans la table ${tableName}.`);
+        
+        let store = { ...demoDataStore };
+        const key = tableName;
+        
+        // Assigner un ID unique pour le mode démo
+        const newRecord = { ...recordData, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+        
+        if (Array.isArray(store[key])) {
+            store[key] = [...store[key], newRecord];
+        } else {
+            console.error(`Tentative d'INSERT sur une collection inconnue ou non-array: ${key}`);
+        }
+        
+        saveDemoData(store);
+        return { data: [newRecord], error: null };
+    }
+
+    // --- MODE SUPABASE ---
     const { data, error } = await supabase
         .from(tableName)
         .insert(recordData)
@@ -107,17 +214,12 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
     // Simulation de l'ajout d'un pilote
     const handleAddPilot = async (e) => {
         e.preventDefault();
-        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
-
-        // NOTE: Dans la version Supabase, ceci ne crée PAS d'utilisateur Auth réel.
-        // L'utilisateur devra s'authentifier par lui-même ensuite.
+        
         const newPilot = {
             name: newPilotName,
             email: newPilotEmail,
             is_admin: false, // Colonne renommée pour Supabase (snake_case)
-            // Simule un ID pour la table co_owners. Idéalement, l'UID Supabase serait utilisé ici.
-            id: `simulated-uid-${Date.now()}`,
-            created_at: new Date().toISOString()
+            // L'ID sera géré par insertRecord (UUID en mode démo, UID Supabase en mode réel)
         };
 
         const { error } = await insertRecord('co_owners', newPilot);
@@ -127,19 +229,17 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
         } else {
             setNewPilotEmail('');
             setNewPilotName('');
-            alert("Pilote ajouté. Assurez-vous que l'utilisateur s'authentifie pour que son UID soit lié à son profil.");
+            alert(`Pilote ajouté. En mode démo, les co-propriétaires sont stockés localement.`);
         }
     };
 
     // Ajout d'une catégorie de dépense
     const handleAddCategory = async (e) => {
         e.preventDefault();
-        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
-
+        
         const newCat = {
             value: newCategoryName.toLowerCase().replace(/\s/g, '_'),
             label: newCategoryName,
-            created_at: new Date().toISOString()
         };
 
         const { error } = await insertRecord('expense_categories', newCat);
@@ -148,14 +248,14 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
             alert(`Erreur d'ajout: ${error.message}`);
         } else {
             setNewCategoryName('');
+            alert("Catégorie de dépense ajoutée.");
         }
     };
 
     // Mise à jour des coûts fixes de l'ULM
     const handleUpdateAircraft = async (e) => {
         e.preventDefault();
-        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
-
+        
         const { error } = await upsertRecord('aircraft', {
             id: AIRCRAFT_ID, // Clé primaire
             name: aircraftData.name || 'ULM G70',
@@ -197,7 +297,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
                             className={MobileInputStyle.replace('text-lg', 'text-base p-3')}
                             required
                         />
-                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')} disabled={!supabase}>
+                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')}>
                             Ajouter le Pilote
                         </button>
                     </form>
@@ -245,7 +345,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
                         />
                         <p className="text-xs text-gray-500 mt-1">Assurance, hangar, révision annuelle obligatoire, etc.</p>
                     </div>
-                    <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')} disabled={!supabase}>
+                    <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2')}>
                         Mettre à jour les Coûts Fixes
                     </button>
                 </form>
@@ -264,7 +364,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
                             className={MobileInputStyle.replace('text-lg', 'text-base p-3')}
                             required
                         />
-                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2').replace('w-full', 'w-auto')} disabled={!supabase}>
+                        <button type="submit" className={PrimaryButtonStyle.replace('py-3', 'py-2').replace('w-full', 'w-auto')}>
                             Ajouter
                         </button>
                     </div>
@@ -272,7 +372,7 @@ const AdminView = ({ pilots, aircraftData, expenseCategories, currentUserId }) =
 
                 <div className="mt-4 flex flex-wrap gap-2">
                     {expenseCategories.map((cat) => (
-                        <span key={cat.value} className="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-full">
+                        <span key={cat.id} className="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-full">
                             {cat.label}
                         </span>
                     ))}
@@ -291,15 +391,13 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
-
+        
         const newExpense = {
             date: date,
             cost: parseFloat(amount),
             type: type,
             description: description,
             user_id: userId,
-            created_at: new Date().toISOString()
         };
 
         const { error } = await insertRecord('expenses', newExpense);
@@ -311,13 +409,14 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories }) => {
             setAmount('');
             setDescription('');
             onClose();
+            alert("Dépense enregistrée (localement ou sur Supabase).");
         }
     };
 
     if (!isOpen) return null;
 
     const allCategories = [
-        { value: 'Maintenance', label: 'Maintenance (Prévue)' },
+        { id: '0', value: 'Maintenance', label: 'Maintenance (Prévue)' },
         ...expenseCategories
     ];
 
@@ -356,7 +455,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories }) => {
                             required
                         >
                             {allCategories.map(cat => (
-                                <option key={cat.value} value={cat.value}>{cat.label}</option>
+                                <option key={cat.id} value={cat.value}>{cat.label}</option>
                             ))}
                         </select>
                     </div>
@@ -374,7 +473,7 @@ const AddExpenseModal = ({ isOpen, onClose, userId, expenseCategories }) => {
                         <button type="button" onClick={onClose} className={SecondaryButtonStyle.replace('w-full', 'w-auto px-4')}>
                             Annuler
                         </button>
-                        <button type="submit" className={PrimaryButtonStyle.replace('w-full', 'w-auto px-4')} disabled={!supabase}>
+                        <button type="submit" className={PrimaryButtonStyle.replace('w-full', 'w-auto px-4')}>
                             Enregistrer la Dépense
                         </button>
                     </div>
@@ -451,8 +550,8 @@ const CostsView = ({ expenses, flightLogs, aircraftData, totalFlightHours, expen
 
                 <div className="mt-6 p-4 bg-gray-50 rounded-xl">
                     <h3 className="text-lg font-semibold mb-2">Formule du Coût Horaire Réel :</h3>
-                    <p className="text-sm text-gray-700">
-                        $$\frac{\text{Coûts Fixes} + \text{Coûts Variables} + \text{Coût Carburant}}{\text{Heures Volées}}$$
+                    <p className="text-sm text-gray-700 font-mono overflow-x-auto">
+                        (Coûts Fixes + Coûts Variables + Coût Carburant) / Heures Volées
                     </p>
                 </div>
             </div>
@@ -501,8 +600,7 @@ const LogFlightView = ({ userId, pilots, aircraftData }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
-
+        
         const endHours = parseFloat(endTachHours);
         const fuel = parseFloat(fuelCost);
 
@@ -603,7 +701,7 @@ const LogFlightView = ({ userId, pilots, aircraftData }) => {
                             required
                         />
                     </div>
-                    <button type="submit" className={PrimaryButtonStyle} disabled={!supabase}>
+                    <button type="submit" className={PrimaryButtonStyle}>
                         Enregistrer le Vol et Mettre à Jour TACH
                     </button>
                 </form>
@@ -723,8 +821,7 @@ const ReserveView = ({ userId, reservations, currentPilot }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!supabase) return alert("Erreur: Base de données non connectée. Impossible de persister.");
-
+        
         const reservationStart = new Date(`${selectedDate}T${startTime}:00`);
         const reservationEnd = new Date(`${selectedDate}T${endTime}:00`);
 
@@ -829,7 +926,7 @@ const ReserveView = ({ userId, reservations, currentPilot }) => {
                         />
                     </div>
 
-                    <button type="submit" className={PrimaryButtonStyle} disabled={!supabase}>
+                    <button type="submit" className={PrimaryButtonStyle}>
                         Confirmer la Réservation
                     </button>
                 </form>
@@ -864,7 +961,7 @@ const DashboardView = ({ aircraftData, pilots, totalFlightHours, realHourlyCost,
 
             {!isConnected && (
                 <div className="text-center p-4 bg-yellow-100 text-yellow-800 border border-yellow-400 rounded-xl">
-                    <p className="font-semibold">Mode Démo : La base de données Supabase n'est pas connectée. Aucune donnée ne sera sauvegardée.</p>
+                    <p className="font-semibold">MODE DÉMO: La base de données Supabase n'est pas connectée. Les données sont sauvegardées localement dans votre navigateur.</p>
                 </div>
             )}
 
@@ -921,21 +1018,34 @@ const App = () => {
     const [flightLogs, setFlightLogs] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [expenseCategories, setExpenseCategories] = useState([]);
+    const [demoRefresh, setDemoRefresh] = useState(0); // Compteur pour forcer le refresh démo
 
     const isConnected = !!supabase;
 
-    // 1. Authentification Supabase et Initialisation de l'utilisateur
-    // NOTE: Utilisation d'un drapeau pour s'assurer que les données 'pilots' sont chargées avant de créer/mettre à jour le profil.
-    const [isPilotsLoaded, setIsPilotsLoaded] = useState(false);
-
-    // 2. Chargement des données temps réel (Supabase)
+    // 1. Mise en place de l'écouteur de mise à jour pour le mode démo
     useEffect(() => {
-        if (!isConnected) return;
+        if (isConnected) return;
+        loadDemoData(); // Charge les données initiales du localStorage
 
+        const handleDemoUpdate = () => {
+            setDemoRefresh(r => r + 1); // Force le re-render en mode démo
+        };
+
+        window.addEventListener('demoDataUpdated', handleDemoUpdate);
+        return () => window.removeEventListener('demoDataUpdated', handleDemoUpdate);
+    }, [isConnected]);
+    
+    // 2. Chargement des données (Mode Supabase ou Mode Démo)
+    useEffect(() => {
+        // Le `demoRefresh` force le rechargement des données locales
+        const refreshKey = isConnected ? 1 : demoRefresh; 
+        
         // Écouteur ULM (Singleton)
         const fetchAndSubscribeAircraft = async () => {
-            // Récupération initiale de l'ULM
+             // Récupération initiale de l'ULM
             await fetchSingleRecord('aircraft', AIRCRAFT_ID, setAircraftData);
+            
+            if (!isConnected) return; // Le mode démo est géré par subscribeToTable
 
             // Création si inexistant (pour la première utilisation)
             const { data: aircraft } = await supabase.from('aircraft').select('*').eq('id', AIRCRAFT_ID).single();
@@ -960,16 +1070,20 @@ const App = () => {
         const unsubExpenses = subscribeToTable('expenses', setExpenses);
         const unsubCategories = subscribeToTable('expense_categories', setExpenseCategories);
 
-        // L'écouteur de l'ULM est séparé car il est un singleton
-        const aircraftSubscription = supabase
-            .channel('aircraft_channel')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'aircraft' }, (payload) => {
-                // Mise à jour si l'ULM est affecté
-                if (payload.new.id === AIRCRAFT_ID) {
-                    setAircraftData(payload.new);
-                }
-            })
-            .subscribe();
+        let aircraftSubscription = null;
+        if (isConnected) {
+            // L'écouteur de l'ULM est séparé car il est un singleton
+            aircraftSubscription = supabase
+                .channel('aircraft_channel')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'aircraft' }, (payload) => {
+                    // Mise à jour si l'ULM est affecté
+                    if (payload.new.id === AIRCRAFT_ID) {
+                        setAircraftData(payload.new);
+                    }
+                })
+                .subscribe();
+        }
+
 
         return () => {
             unsubPilots();
@@ -977,88 +1091,81 @@ const App = () => {
             unsubLogs();
             unsubExpenses();
             unsubCategories();
-            supabase.removeChannel(aircraftSubscription);
+            if (aircraftSubscription) {
+                supabase.removeChannel(aircraftSubscription);
+            }
         };
-    }, [isConnected]); // Dépend de isConnected uniquement
+    }, [isConnected, demoRefresh]); // Dépend de isConnected et du compteur de rafraîchissement démo
 
-    // 3. Gestion de l'authentification et du profil (Dépend de isPilotsLoaded)
+    // 3. Gestion de l'authentification et du profil
     useEffect(() => {
-        if (!isConnected) {
-            // Mode démo si Supabase n'est pas initialisé
-            setUserId(crypto.randomUUID());
-            setCurrentPilot({ name: 'Pilote Démo', is_admin: true });
-            setIsAdmin(true);
-            setIsAuthReady(true);
-            return;
-        }
-
         if (!isPilotsLoaded) return; // Attend que la liste des pilotes soit chargée
 
         const checkAuthAndProfile = async () => {
-            let user = (await supabase.auth.getSession()).data.session?.user;
+            let currentUserId;
+            let existingProfile;
+            let isFirstUser;
+            let userData;
 
-            if (!user) {
-                // Tente de se connecter anonymement
-                const { data, error } = await supabase.auth.signInAnonymously();
-                if (error) {
-                    console.error("Erreur de connexion anonyme Supabase:", error);
-                    return;
+            if (!isConnected) {
+                // --- MODE DÉMO ---
+                currentUserId = localStorage.getItem('demo_user_id') || crypto.randomUUID();
+                localStorage.setItem('demo_user_id', currentUserId);
+            } else {
+                // --- MODE SUPABASE ---
+                let user = (await supabase.auth.getSession()).data.session?.user;
+                if (!user) {
+                    const { data } = await supabase.auth.signInAnonymously();
+                    user = data.user;
                 }
-                user = data.user;
+                currentUserId = user.id;
             }
 
-            if (user) {
-                const currentUserId = user.id;
-                setUserId(currentUserId);
-                
-                // Vérifie si le profil existe déjà
-                const existingProfile = pilots.find(p => p.id === currentUserId);
-                const isFirstUser = pilots.length === 0;
+            setUserId(currentUserId);
+            existingProfile = pilots.find(p => p.id === currentUserId);
+            isFirstUser = pilots.length === 0;
 
-                let userData;
+            if (existingProfile) {
+                userData = existingProfile;
+            } else {
+                // Création du profil pour le nouvel utilisateur (ID démo ou UID Supabase)
+                const newProfile = {
+                    id: currentUserId, 
+                    name: `Pilote-${currentUserId.substring(0, 4)}`,
+                    email: isConnected ? 'N/A (Anonyme)' : 'demo@ulm.test',
+                    is_admin: isFirstUser, // Le premier utilisateur devient admin
+                    created_at: new Date().toISOString()
+                };
 
-                if (existingProfile) {
-                    userData = existingProfile;
+                const { data: profileData, error: profileError } = await insertRecord('co_owners', newProfile);
+
+                if (profileError) {
+                    console.warn("Erreur de création de profil, réessai de récupération:", profileError);
+                    userData = newProfile; 
                 } else {
-                    // Création du profil pour le nouvel utilisateur (anonyme)
-                    const newProfile = {
-                        id: currentUserId, // UID Supabase
-                        name: `Pilote-${currentUserId.substring(0, 4)}`,
-                        email: user.email || 'N/A (Anonyme)',
-                        is_admin: isFirstUser, // Le premier utilisateur devient admin
-                        created_at: new Date().toISOString()
-                    };
-
-                    const { data: profileData, error: profileError } = await insertRecord('co_owners', newProfile);
-
-                    if (profileError) {
-                         // Peut échouer si deux clients créent en même temps, on se rabat sur la liste chargée
-                        console.warn("Erreur de création de profil, réessai de récupération:", profileError);
-                        userData = newProfile; // Utilise les données locales pour éviter le blocage
-                    } else {
-                         userData = profileData?.[0] || newProfile;
-                    }
+                     userData = profileData?.[0] || newProfile;
                 }
-
-                setCurrentPilot(userData);
-                setIsAdmin(userData.is_admin || false);
             }
+
+            setCurrentPilot(userData);
+            setIsAdmin(userData.is_admin || false);
             setIsAuthReady(true);
         };
 
         checkAuthAndProfile();
 
-        // Écoute des changements d'état d'authentification Supabase
-        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-            if (session?.user) {
-                checkAuthAndProfile(); // Re-vérifie le profil
-            }
-        });
+        // Écoute des changements d'état d'authentification Supabase (uniquement en mode réel)
+        if (isConnected) {
+            const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+                if (session?.user) {
+                    checkAuthAndProfile(); // Re-vérifie le profil
+                }
+            });
 
-        return () => {
-            authListener?.subscription.unsubscribe();
-        };
-
+            return () => {
+                authListener?.subscription.unsubscribe();
+            };
+        }
     }, [isConnected, isPilotsLoaded, pilots]);
 
 

@@ -54,15 +54,10 @@ MIDDLEWARE = [
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'], # Utilise BASE_DIR défini en haut
-        'APP_DIRS': True, 
+        'DIRS': [],  # <--- METS CETTE LIGNE À VIDE
+        'APP_DIRS': True, # C'est cette ligne qui permet de trouver 'copro/templates/copro'
         'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
+            # ... (reste des options)
         },
     },
 ]

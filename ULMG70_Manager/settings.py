@@ -36,5 +36,6 @@ DATABASES = {'default': db_from_env}
 SECRET_KEY = os.environ.get('SECRET_KEY', 'default-key-tres-secrete-pour-le-local')
 
 # Configuration des Fichiers Statiques (CSS/JS) pour Render
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# Utilise l'opérateur de division de Pathlib, plus moderne et cohérent :
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATIC_URL = '/static/'

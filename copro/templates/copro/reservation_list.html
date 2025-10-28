@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ULM G70 - Réservations</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        header { background-color: #007bff; color: white; padding: 15px; text-align: center; border-radius: 5px 5px 0 0; }
+        .container { max-width: 800px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 0 0 5px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h2 { border-bottom: 2px solid #ccc; padding-bottom: 10px; margin-top: 0; }
+        .reservation-item { padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-left: 5px solid #007bff; border-radius: 3px; }
+        .no-reservation { text-align: center; color: #6c757d; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>✈️ Gestion Copropriété ULM G70</h1>
+    </header>
+
+    <div class="container">
+        <h2>Calendrier des Réservations Futures</h2>
+
+        {% if reservations %}
+            {% for reservation in reservations %}
+            <div class="reservation-item">
+                <strong>{{ reservation.coproprietaire.username }}</strong> a réservé l'ULM :
+                <ul>
+                    <li>**Du :** {{ reservation.date_debut|date:"D d M Y à H:i" }}</li>
+                    <li>**Au :** {{ reservation.date_fin|date:"D d M Y à H:i" }}</li>
+                    {% if reservation.motif %}
+                        <li>**Motif :** {{ reservation.motif }}</li>
+                    {% endif %}
+                </ul>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="no-reservation">Aucune réservation future n'est enregistrée pour le moment. L'ULM est disponible !</p>
+        {% endif %}
+        
+        <p style="margin-top: 20px;">
+            <a href="#">[Ajouter une nouvelle réservation]</a> | 
+            <a href="/admin/">[Accès Administration]</a>
+        </p>
+    </div>
+</body>
+</html>

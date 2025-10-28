@@ -1,3 +1,10 @@
+# AJOUTER CETTE SECTION pour définir BASE_DIR de manière moderne et robuste
+from pathlib import Path
+# Configuration du Déploiement sur Render/Production
+import dj_database_url # Nécessite 'dj-database-url' dans requirements.txt (AJOUTE-LE si ce n'est pas fait!)
+import os
+
+
 # ULMG70_Manager/settings.py (extrait)
 
 INSTALLED_APPS = [
@@ -43,11 +50,7 @@ TEMPLATES = [
 
 
 
-# AJOUTER CETTE SECTION pour définir BASE_DIR de manière moderne et robuste
-from pathlib import Path
-# Configuration du Déploiement sur Render/Production
-import dj_database_url # Nécessite 'dj-database-url' dans requirements.txt (AJOUTE-LE si ce n'est pas fait!)
-import os
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

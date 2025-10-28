@@ -16,6 +16,11 @@ INSTALLED_APPS = [
 import dj_database_url # Nécessite 'dj-database-url' dans requirements.txt (AJOUTE-LE si ce n'est pas fait!)
 import os
 
+# AJOUTER CETTE SECTION pour définir BASE_DIR de manière moderne et robuste
+from pathlib import Path
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent
 # Sécurité: La liste des hôtes autorisés (Render va remplir cela avec ton URL)
 # Remplacer 'ton-domaine.com' par ton URL Render
 ALLOWED_HOSTS = ['*'] # * Pour commencer, puis mieux vaut spécifier l'URL Render

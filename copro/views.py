@@ -1,14 +1,15 @@
-from django.views.generic import TemplateView # Change de ListView à TemplateView
+from django.views.generic import TemplateView, ListView # Importe ListView
+from .models import Reservation # Importe le modèle
+from django.utils import timezone 
 
-# --- Les autres imports ne sont plus nécessaires pour l'instant ---
-# from .models import Reservation
-# from django.utils import timezone 
-
-# Affiche la liste des réservations futures (temporairement en TemplateView)
-class ReservationListView(TemplateView):
-    # Lien vers le fichier HTML. AUCUN code de base de données n'est exécuté.
+# La vue du Dashboard / Liste des Réservations
+class ReservationListView(ListView):
     template_name = 'copro/reservation_list.html'
-    
-    # Nous n'avons pas besoin de get_queryset() pour l'instant
-    
-# --- Fin de la vue ---
+    context_object_name = 'object_list' # Renommer pour être standard
+
+    def get_queryset(self):
+        # Récupère et filtre les réservations futures
+        return Reservation.objects.filter(date_fin__gte=timezone.now()).order_by('date_debut')
+
+# Vue pour le Journal de Bord (sera complétée plus tard)
+# ...

@@ -51,17 +51,27 @@ MIDDLEWARE = [
 # ************************************************************
 # 5. TEMPLATES (Configuration du Moteur HTML)
 # ************************************************************
+# ...
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],  # <--- METS CETTE LIGNE À VIDE
-        'APP_DIRS': True, # C'est cette ligne qui permet de trouver 'copro/templates/copro'
+        'DIRS': [], 
+        'APP_DIRS': True,
         'OPTIONS': {
-            # ... (reste des options)
+            'context_processors': [
+                # Ces deux lignes manquent ou étaient mal placées, causant les erreurs :
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                
+                # ERREURS E402 ET E404 : DOIVENT ÊTRE PRÉSENTS !
+                'django.contrib.auth.context_processors.auth', 
+                'django.contrib.messages.context_processors.messages', 
+                
+            ],
         },
     },
 ]
-
+# ...
 
 # ************************************************************
 # 6. CONFIGURATION RENDU ET BASE DE DONNÉES

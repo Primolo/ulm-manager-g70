@@ -10,7 +10,36 @@ INSTALLED_APPS = [
     # --- AJOUTER CETTE LIGNE ---
     'copro.apps.CoproConfig', 
 ]
-# ULMG70_Manager/settings.py (à la fin)
+#----------------------------------------------------
+# MIDDLEWARE (Intergiciels pour Sessions, Utilisateurs, Sécurité)
+#----------------------------------------------------
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware', # Nécessaire pour les formulaires (CSRF)
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+#----------------------------------------------------
+# TEMPLATES (Configuration du Moteur HTML)
+#----------------------------------------------------
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'], # Utilise BASE_DIR pour chercher les templates à la racine du projet si besoin
+        'APP_DIRS': True, # TRÈS IMPORTANT : Dit à Django de chercher dans copro/templates/
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
 
 
 
@@ -39,3 +68,9 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'default-key-tres-secrete-pour-le-loca
 # Utilise l'opérateur de division de Pathlib, plus moderne et cohérent :
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATIC_URL = '/static/'
+
+
+# Correction du Warning Django (pour une meilleure pérennité des identifiants)
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+

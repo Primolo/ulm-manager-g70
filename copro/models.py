@@ -1,6 +1,8 @@
 
 from django.db import models
-from django.contrib.auth.models import CopropietaireProfile
+from django.contrib.auth.models import User # Pour lier à l'utilisateur Django
+# L'importation de CopropietaireProfile ici n'est PAS nécessaire
+# L'importation de LogEntry non plus, sauf si un autre fichier les importait
 
 # --- Modèle 1 : Profil des Copropriétaires ---
 class CopropietaireProfile(models.Model):

@@ -45,14 +45,13 @@
         
         <div class="reservation-list">
             <h2>Réservations en Cours</h2>
-            {% if object_list %} {% for reservation in object_list %}
+            
+            {% for reservation in object_list %} 
                 <div class="reservation-item">
                     <span class="reservation-title">{{ reservation.coproprietaire.username }}</span> a réservé du {{ reservation.date_debut|date:"D d M à H:i" }} au {{ reservation.date_fin|date:"H:i" }}.
                 </div>
-                {% endfor %}
-            {% else %}
-                <p>Aucune réservation future n'est enregistrée. L'ULM est disponible !</p>
-            {% endif %}
+            {% empty %} <p>Aucune réservation future n'est enregistrée. L'ULM est disponible !</p>
+            {% endfor %}
         </div>
         
         <div class="dashboard-grid">

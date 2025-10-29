@@ -1,6 +1,6 @@
 
 from django.db import models
-from django.contrib.auth.models import User
+from django.contrib.auth.models import CopropietaireProfile
 
 # --- Modèle 1 : Profil des Copropriétaires ---
 class CopropietaireProfile(models.Model):
@@ -24,7 +24,7 @@ class CopropietaireProfile(models.Model):
 # --- Modèle 2 : Réservations ---
 class Reservation(models.Model):
     coproprietaire = models.ForeignKey(
-        User, 
+        CopropietaireProfile, 
         on_delete=models.CASCADE, 
         verbose_name="Réservé par"
     )

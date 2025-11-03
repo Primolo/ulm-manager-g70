@@ -1,12 +1,10 @@
-from django.contrib import admin
-from django.urls import path, include 
+from django.urls import path
+# Importe la vue du dashboard de ton application
+from .views import ReservationListView 
 
 urlpatterns = [
-    # 1. URLS DU THÈME JET (OBLIGATOIRES AVANT /admin/)
-    path('jet/', include('jet.urls', 'jet')),
-    # 2. URLS DU DASHBOARD JET (Souvent manquant, cause du 500)
-    path('jet/dashboard/', include('jet.dashboard.urls', 'jet-dashboard')), 
-    
-    path('admin/', admin.site.urls),
-    path('', include('copro.urls')), 
+    # Définit le Dashboard comme la page d'accueil de l'application
+    path('', ReservationListView.as_view(), name='reservation_list'),
+    # Future URL pour le formulaire du Logbook
+    # path('logbook/add/', LogEntryCreateView.as_view(), name='logentry_add'), 
 ]

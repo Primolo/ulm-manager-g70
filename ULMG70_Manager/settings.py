@@ -95,3 +95,6 @@ STATIC_URL = '/static/'
 
 # Correction du Warning Django (pour une meilleure pérennité des identifiants)
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Permet à Jet de gérer son design
+JET_THEME = 'default'

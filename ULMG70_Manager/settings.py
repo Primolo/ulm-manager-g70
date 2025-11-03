@@ -21,7 +21,17 @@ ALLOWED_HOSTS = ['*']
 # Configuration des URLs
 ROOT_URLCONF = 'ULMG70_Manager.urls' # C'est le fichier principal
 APPEND_SLASH = True # Ceci est la valeur par défaut et doit être présente
+# ... (Après le reste des configurations de base)
 
+LANGUAGE_CODE = 'fr-fr' # <-- MODIFIE CETTE LIGNE
+
+TIME_ZONE = 'Europe/Paris' # <-- MODIFIE CETTE LIGNE
+
+USE_I18N = True # Laissez à True
+USE_L10N = True # Laissez à True
+USE_TZ = True # Laissez à True
+
+# ...
 
 # ************************************************************
 # 3. APPLICATIONS

@@ -25,6 +25,9 @@ ROOT_URLCONF = 'ULMG70_Manager.urls'
 # 3. APPLICATIONS
 # ************************************************************
 INSTALLED_APPS = [
+    # --- LE THÈME DOIT ÊTRE EN PREMIER ! ---
+    'simpleui', 
+    'django.contrib.admin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

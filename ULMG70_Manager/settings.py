@@ -27,8 +27,6 @@ APPEND_SLASH = True # Ceci est la valeur par défaut et doit être présente
 # 3. APPLICATIONS
 # ************************************************************
 INSTALLED_APPS = [
-    # --- THÈME JET : DOIT ÊTRE EN PREMIER ! ---
-    'jet',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -98,5 +96,4 @@ STATIC_URL = '/static/'
 # Correction du Warning Django (pour une meilleure pérennité des identifiants)
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Permet à Jet de gérer son design
-JET_THEME = 'default'
+

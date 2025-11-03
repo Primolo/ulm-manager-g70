@@ -2,3 +2,4 @@ Django
 psycopg2-binary  # Le connecteur pour la base de données PostgreSQL
 gunicorn       # Le serveur WSGI pour la production
 dj-database-url
+django-simple-ui

@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
                 ('aerodrome_depart', models.CharField(max_length=50, verbose_name='Aérodrome de Départ')),
                 ('aerodrome_arrivee', models.CharField(max_length=50, verbose_name="Aérodrome d'Arrivée")),
                 ('notes', models.TextField(blank=True, null=True, verbose_name='Notes (Maintenance, Carburant, Observations)')),
-                # Correction de la casse: to='copro.CopropietaireProfile'
+                # CORRECTION DE CASSE ET D'IMPORTATION (Référence par chaîne)
                 ('pilote', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='copro.CopropietaireProfile', verbose_name='Pilote')),
             ],
             options={
@@ -49,7 +49,7 @@ class Migration(migrations.Migration):
                 ('date_debut', models.DateTimeField(verbose_name='Début de la réservation')),
                 ('date_fin', models.DateTimeField(verbose_name='Fin de la réservation')),
                 ('motif', models.TextField(blank=True, max_length=500, null=True, verbose_name='Motif / Destination (Optionnel)')),
-                # Correction de la casse: to='copro.CopropietaireProfile'
+                # CORRECTION DE CASSE ET D'IMPORTATION (Référence par chaîne)
                 ('coproprietaire', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='copro.CopropietaireProfile', verbose_name='Réservé par')),
             ],
             options={

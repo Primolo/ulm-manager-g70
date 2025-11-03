@@ -1,5 +1,5 @@
 from django import forms
-from .models import LogEntry, Reservation, CoproprietaireProfile # Importe les modèles nécessaires
+from copro.models import LogEntry, Reservation, CoproprietaireProfile # Importe les modèles nécessaires
 from django.contrib.auth.models import User # Pour les vérifications, si nécessaire
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---

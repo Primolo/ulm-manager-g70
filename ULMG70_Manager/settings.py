@@ -18,8 +18,10 @@ DEBUG = os.environ.get('DEBUG') == 'True' # Pour la production, nous fixons DEBU
 # Sécurité: La liste des hôtes autorisés (Render va remplir cela avec ton URL)
 ALLOWED_HOSTS = ['*'] 
 
-# Le chemin vers ton fichier d'URLs principal (celui qui contient la ligne include('copro.urls'))
-ROOT_URLCONF = 'ULMG70_Manager.urls'
+# Configuration des URLs
+ROOT_URLCONF = 'ULMG70_Manager.urls' # C'est le fichier principal
+APPEND_SLASH = True # Ceci est la valeur par défaut et doit être présente
+
 
 # ************************************************************
 # 3. APPLICATIONS

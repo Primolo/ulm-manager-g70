@@ -25,13 +25,14 @@ ROOT_URLCONF = 'ULMG70_Manager.urls'
 # 3. APPLICATIONS
 # ************************************************************
 INSTALLED_APPS = [
+    # --- THÈME JET : DOIT ÊTRE EN PREMIER ! ---
+    'jet',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
     'copro.apps.CoproConfig', 
 ]
 

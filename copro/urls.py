@@ -1,10 +1,10 @@
+# copro/urls.py (Mise à jour)
+
 from django.urls import path
-# Importe la vue du dashboard de ton application
-from .views import ReservationListView 
+from .views import ReservationListView, LogEntryCreateView # Importe la nouvelle vue
 
 urlpatterns = [
-    # Définit le Dashboard comme la page d'accueil de l'application
     path('', ReservationListView.as_view(), name='reservation_list'),
-    # Future URL pour le formulaire du Logbook
-    # path('logbook/add/', LogEntryCreateView.as_view(), name='logentry_add'), 
+    # --- URL pour ENREGISTRER UN VOL ---
+    path('logbook/add/', LogEntryCreateView.as_view(), name='logentry_add'), 
 ]

@@ -1,13 +1,14 @@
 from django import forms
-from django.contrib.auth.models import User 
+from django.contrib.auth.models import User
+# Nous aurons besoin de apps pour charger le modèle de manière sûre.
+from django.apps import apps 
 
-# ATTENTION: On ne met AUCUN import de modèle de l'application 'copro' ici.
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # Référence par chaîne (Application.Modèle)
+        # Référence par chaîne. Django ne tentera pas de charger le modèle ici.
         model = 'copro.LogEntry' 
         fields = [
             'pilote', 
@@ -21,17 +22,18 @@ class LogEntryForm(forms.ModelForm):
             'notes': forms.Textarea(attrs={'rows': 4}),
         }
 
-    # L'importation de CoproprietaireProfile se fait ici, de manière sûre et locale
+    # Le __init__ est exécuté APRÈS le démarrage du serveur, ce qui permet de charger les modèles en sécurité.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from copro.models import CoproprietaireProfile # Importation locale et sûre
+        # Charger le modèle CoproprietaireProfile de manière sûre
+        CopropietaireProfile = apps.get_model('copro', 'CopropietaireProfile')
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        # Référence par chaîne (Application.Modèle)
+        # Référence par chaîne
         model = 'copro.Reservation'
         fields = [
             'coproprietaire', 
@@ -45,8 +47,8 @@ class ReservationForm(forms.ModelForm):
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
-    # L'importation de CoproprietaireProfile se fait ici, de manière sûre et locale
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from copro.models import CoproprietaireProfile # Importation locale et sûre
+        # Charger le modèle CoproprietaireProfile de manière sûre
+        CopropietaireProfile = apps.get_model('copro', 'CopropietaireProfile')
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

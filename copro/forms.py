@@ -8,24 +8,19 @@ from django.apps import apps
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # Référence par chaîne. Django ne tentera pas de charger le modèle ici.
+        # NOTE : Référence par chaîne. C'est l'importation tardive qui la résout.
         model = 'copro.LogEntry' 
+        # ... (reste des champs et widgets) ...
         fields = [
-            'pilote', 
-            'duree_vol', 
-            'heures_moteur_total', 
-            'aerodrome_depart', 
-            'aerodrome_arrivee', 
-            'notes'
+            'pilote', 'duree_vol', 'heures_moteur_total', 'aerodrome_depart', 
+            'aerodrome_arrivee', 'notes'
         ]
-        widgets = {
-            'notes': forms.Textarea(attrs={'rows': 4}),
-        }
+        widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
-    # Le __init__ est exécuté APRÈS le démarrage du serveur, ce qui permet de charger les modèles en sécurité.
+    # La méthode la plus sûre pour charger les modèles dans un formulaire
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Charger le modèle CoproprietaireProfile de manière sûre
+        # CHARGEMENT TARDIF ET SÉCURISÉ (évite l'AttributeError)
         CopropietaireProfile = apps.get_model('copro', 'CopropietaireProfile')
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
@@ -35,11 +30,9 @@ class ReservationForm(forms.ModelForm):
     class Meta:
         # Référence par chaîne
         model = 'copro.Reservation'
+        # ... (reste des champs et widgets) ...
         fields = [
-            'coproprietaire', 
-            'date_debut', 
-            'date_fin', 
-            'motif'
+            'coproprietaire', 'date_debut', 'date_fin', 'motif'
         ]
         widgets = {
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
@@ -49,6 +42,6 @@ class ReservationForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Charger le modèle CoproprietaireProfile de manière sûre
+        # CHARGEMENT TARDIF ET SÉCURISÉ
         CopropietaireProfile = apps.get_model('copro', 'CopropietaireProfile')
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

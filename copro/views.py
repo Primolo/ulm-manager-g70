@@ -5,13 +5,11 @@ from django.shortcuts import render
 from django.http import JsonResponse
 from datetime import datetime, date
 
-# 1. IMPORTER LES MODÈLES AVANT LES FORMULAIRES
+# IMPORTER LES MODÈLES AVANT LES FORMULAIRES EST CRUCIAL
 from .models import Reservation, LogEntry 
-# 2. IMPORTER LES FORMULAIRES EN DERNIER
 from .forms import ReservationForm, LogEntryForm 
 
-# ... (le reste du code des vues est correct et inchangé)
-# ...
+# ... (Le reste des vues que nous avons écrit est correct)
 
 # --- Vues du Dashboard ---
 

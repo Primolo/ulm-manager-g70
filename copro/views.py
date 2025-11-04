@@ -29,7 +29,7 @@ class LogEntryCreateView(CreateView):
     template_name = 'copro/logentry_form.html'
     success_url = reverse_lazy('reservation_list')
 
-Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
+#Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
 class ReservationCreateView(CreateView):
     model = Reservation
     form_class = ReservationForm

@@ -1,14 +1,16 @@
-from django.views.generic import ListView, CreateView, View # Ajout de View
+from django.views.generic import ListView, CreateView, View # Import des classes génériques
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
 from django.http import JsonResponse # Pour le flux JSON
 from datetime import datetime, date # Pour la gestion du temps
 
-# Imports de l'Application (Vérifié et Stable)
+# --- Imports de l'Application (Le plus stable) ---
+# Importer les modèles d'abord
 from .models import Reservation, LogEntry 
+# Importer les formulaires ensuite
 from .forms import ReservationForm, LogEntryForm 
-
+# --------------------------------------------------
 
 # --- Vues du Dashboard ---
 
@@ -29,14 +31,14 @@ class LogEntryCreateView(CreateView):
     template_name = 'copro/logentry_form.html'
     success_url = reverse_lazy('reservation_list')
 
-#Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
+# Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
 class ReservationCreateView(CreateView):
     model = Reservation
     form_class = ReservationForm
     template_name = 'copro/reservation_form.html'
     success_url = reverse_lazy('reservation_list')
     
-    # --- AJOUT CRITIQUE POUR L'ERREUR 500 ---
+    # --- GESTION DE LA DATE DU CALENDRIER ---
     def get_initial(self):
         # Récupère la date de début si elle est présente dans l'URL (via FullCalendar)
         initial = super().get_initial()

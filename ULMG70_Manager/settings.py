@@ -30,7 +30,18 @@ TIME_ZONE = 'Europe/Paris' # <-- MODIFIE CETTE LIGNE
 USE_I18N = True # Laissez à True
 USE_L10N = True # Laissez à True
 USE_TZ = True # Laissez à True
+# ... (Après TIME_ZONE = 'Europe/Paris' et LANGUAGE_CODE = 'fr-fr')
 
+# Permet à Django de reconnaître le format ISO standard (YYYY-MM-DD HH:MM)
+# utilisé par les widgets datetime-local des navigateurs.
+DATE_INPUT_FORMATS = ['%Y-%m-%d', '%d/%m/%Y', '%d/%m/%y']
+TIME_INPUT_FORMATS = ['%H:%M:%S', '%H:%M']
+DATETIME_INPUT_FORMATS = [
+    '%Y-%m-%d %H:%M:%S',     # Format standard avec secondes
+    '%Y-%m-%d %H:%M',        # Format standard sans secondes (le plus courant)
+    '%d/%m/%Y %H:%M:%S',
+    '%d/%m/%Y %H:%M',
+]
 # ...
 
 # ************************************************************

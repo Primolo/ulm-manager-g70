@@ -3,20 +3,19 @@ from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
 
-# --- Imports de l'Application (Le plus stable) ---
-# copro/views.py (Début du fichier)
+# --- CORRECTION CRITIQUE : IMPORTER LES MODÈLES ---
+from .models import Reservation, LogEntry # <--- CETTE LIGNE EST ESSENTIELLE
+# --------------------------------------------------
 
-# ...
-# Importation simple et relative (correcte pour ce contexte)
+# Imports de tous les formulaires (qui sont corrects)
 from .forms import ReservationForm, LogEntryForm 
-# ...
+
 
 # --- Vues du Dashboard ---
 
 # Vue 1 : Affiche la Liste des Réservations (Dashboard Page d'Accueil)
 class ReservationListView(ListView):
-    # Ajouter le modèle explicitement, la stabilité est garantie par la correction dans forms.py
-    model = Reservation 
+    model = Reservation # Ce modèle est maintenant importé
     template_name = 'copro/reservation_list.html'
     context_object_name = 'object_list'
 
@@ -24,14 +23,14 @@ class ReservationListView(ListView):
         # Récupère et filtre les réservations futures
         return Reservation.objects.filter(date_fin__gte=timezone.now()).order_by('date_debut')
 
-# Vue 2 : Ajout d'une Entrée au Journal de Bord (Carré "Enregistrer un Vol")
+# Vue 2 : Ajout d'une Entrée au Journal de Bord
 class LogEntryCreateView(CreateView):
     model = LogEntry
     form_class = LogEntryForm
     template_name = 'copro/logentry_form.html'
     success_url = reverse_lazy('reservation_list')
 
-# Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
+# Vue 3 : Ajout d'une Réservation
 class ReservationCreateView(CreateView):
     model = Reservation
     form_class = ReservationForm

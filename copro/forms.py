@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        model = LogEntry # OBJET RÉEL
+        model = LogEntry # OBJET PYTHON RÉEL
         fields = ['pilote', 'duree_vol', 'heures_moteur_total', 'aerodrome_depart', 'aerodrome_arrivee', 'notes']
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
@@ -18,7 +18,7 @@ class LogEntryForm(forms.ModelForm):
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        model = Reservation # OBJET RÉEL
+        model = Reservation # OBJET PYTHON RÉEL
         fields = ['coproprietaire', 'date_debut', 'date_fin', 'motif']
         widgets = {
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),

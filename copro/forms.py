@@ -37,8 +37,4 @@ class ReservationForm(forms.ModelForm):
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Importation locale pour le queryset, pour briser la boucle
-        from .models import CoproprietaireProfile 
-        self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()
+   

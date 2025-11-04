@@ -1,13 +1,15 @@
 from django import forms
-# Utiliser une importation relative stricte et simple (le plus stable)
-from .models import LogEntry, Reservation, CoproprietaireProfile 
-from django.contrib.auth import get_user_model # Utiliser la fonction recommandée
+# Importation unique de User (car il n'est pas dans copro.models)
+from django.contrib.auth.models import User 
+# NOTE: Nous importons nos modèles ci-dessous, mais pas ici.
+
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        model = LogEntry 
+        # Référence par CHAÎNE pour éviter la boucle d'importation
+        model = 'copro.LogEntry' 
         fields = [
             'pilote', 
             'duree_vol', 
@@ -18,16 +20,18 @@ class LogEntryForm(forms.ModelForm):
         ]
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
+    # Utilisation d'un import local pour le queryset (méthode la plus stable pour ce scénario)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Assure que le queryset utilise le modèle importé
+        from .models import CoproprietaireProfile # Import local stable
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        model = Reservation
+        # Référence par CHAÎNE pour éviter la boucle d'importation
+        model = 'copro.Reservation'
         fields = [
             'coproprietaire', 
             'date_debut', 
@@ -40,7 +44,8 @@ class ReservationForm(forms.ModelForm):
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
+    # Utilisation d'un import local pour le queryset (méthode la plus stable pour ce scénario)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Assure que le queryset utilise le modèle importé
+        from .models import CoproprietaireProfile # Import local stable
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

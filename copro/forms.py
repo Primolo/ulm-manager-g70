@@ -1,33 +1,41 @@
 from django import forms
-# Importation simple de TOUS les modèles de l'application
-from .models import LogEntry, Reservation, CoproprietaireProfile 
+# ATTENTION : NE PAS IMPORTER LogEntry, Reservation, ou CoproprietaireProfile ICI
 from django.contrib.auth.models import User 
+
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # DOIT ÊTRE L'OBJET PYTHON RÉEL
-        model = LogEntry 
+        # Référence le modèle par Chaîne pour stabiliser l'initialisation de ModelForm
+        model = 'copro.LogEntry' 
         fields = [
-            'pilote', 'duree_vol', 'heures_moteur_total', 'aerodrome_depart', 
-            'aerodrome_arrivee', 'notes'
+            'pilote', 
+            'duree_vol', 
+            'heures_moteur_total', 
+            'aerodrome_depart', 
+            'aerodrome_arrivee', 
+            'notes'
         ]
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
+    # IMPORTATION LOCALE : Le seul endroit sûr pour importer CoproprietaireProfile
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Utilise le modèle importé.
+        from .models import CoproprietaireProfile # Import local et stable
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        # DOIT ÊTRE L'OBJET PYTHON RÉEL
-        model = Reservation
+        # Référence le modèle par Chaîne
+        model = 'copro.Reservation'
         fields = [
-            'coproprietaire', 'date_debut', 'date_fin', 'motif'
+            'coproprietaire', 
+            'date_debut', 
+            'date_fin', 
+            'motif'
         ]
         widgets = {
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
@@ -35,6 +43,8 @@ class ReservationForm(forms.ModelForm):
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
+    # IMPORTATION LOCALE : Le seul endroit sûr pour importer CoproprietaireProfile
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        from .models import CoproprietaireProfile # Import local et stable
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

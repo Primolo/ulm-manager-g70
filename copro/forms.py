@@ -1,6 +1,6 @@
 from django import forms
-# Importation simple des modèles, nécessaire pour ModelForm
-from .models import LogEntry, Reservation 
+# Importation simple de TOUS les modèles nécessaires
+from .models import LogEntry, Reservation, CoproprietaireProfile 
 from django.contrib.auth.models import User 
 
 
@@ -11,15 +11,19 @@ class LogEntryForm(forms.ModelForm):
         # DOIT ÊTRE L'OBJET PYTHON RÉEL
         model = LogEntry 
         fields = [
-            'pilote', 'duree_vol', 'heures_moteur_total', 'aerodrome_depart', 
-            'aerodrome_arrivee', 'notes'
+            'pilote', 
+            'duree_vol', 
+            'heures_moteur_total', 
+            'aerodrome_depart', 
+            'aerodrome_arrivee', 
+            'notes'
         ]
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
+    # Méthode __init__ pour filtrer le queryset (Pilote)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Importation locale pour le queryset, pour briser la boucle
-        from .models import CoproprietaireProfile 
+        # Utilise le modèle importé.
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
@@ -29,12 +33,20 @@ class ReservationForm(forms.ModelForm):
         # DOIT ÊTRE L'OBJET PYTHON RÉEL
         model = Reservation
         fields = [
-            'coproprietaire', 'date_debut', 'date_fin', 'motif'
+            'coproprietaire', 
+            'date_debut', 
+            'date_fin', 
+            'motif'
         ]
         widgets = {
+            # Utilisation du widget HTML5 pour la saisie Date/Heure
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
             'date_fin': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
-   
+    # Méthode __init__ pour filtrer le queryset (Copropriétaire)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Utilise le modèle importé.
+        self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

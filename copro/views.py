@@ -1,13 +1,12 @@
-# copro/views.py (Début du fichier)
-
 from django.views.generic import ListView, CreateView
 from django.urls import reverse_lazy
 from django.utils import timezone 
 
-# Utiliser l'importation absolue propre
+# Importation correcte des modèles et formulaires
 from copro.models import Reservation, LogEntry 
 from copro.forms import LogEntryForm, ReservationForm 
-# ... le reste du code est inchangé
+
+# ... le reste des vues
 # --------------------------------------------------------------------------------------------------
 
 # --- Vues du Dashboard ---

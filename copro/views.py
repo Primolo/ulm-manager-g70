@@ -29,12 +29,24 @@ class LogEntryCreateView(CreateView):
     template_name = 'copro/logentry_form.html'
     success_url = reverse_lazy('reservation_list')
 
-# Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
+Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
 class ReservationCreateView(CreateView):
     model = Reservation
     form_class = ReservationForm
     template_name = 'copro/reservation_form.html'
     success_url = reverse_lazy('reservation_list')
+    
+    # --- AJOUT CRITIQUE POUR L'ERREUR 500 ---
+    def get_initial(self):
+        # Récupère la date de début si elle est présente dans l'URL (via FullCalendar)
+        initial = super().get_initial()
+        start_date = self.request.GET.get('start')
+        
+        if start_date:
+            # Assigner la date de début au champ du formulaire
+            initial['date_debut'] = start_date
+        return initial
+    # ------------------------------------------
 
 # Vue 4 : Affiche la liste de toutes les entrées du Journal de Bord
 class LogbookListView(ListView):

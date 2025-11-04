@@ -1,4 +1,4 @@
-from django.views.generic import ListView, CreateView, View 
+from django.views.generic import ListView, CreateView, View, TemplateView # AJOUTER TemplateView
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
@@ -16,15 +16,10 @@ from .forms import ReservationForm, LogEntryForm
 # --- Vues du Dashboard ---
 
 # Vue 1 : Affiche la Liste des Réservations (Dashboard Page d'Accueil)
-class ReservationListView(ListView):
-    model = Reservation
+class ReservationListView(TemplateView): # CHANGEMENT CRITIQUE
+    # Retire model = Reservation
     template_name = 'copro/reservation_list.html'
-    context_object_name = 'object_list'
-
-    def get_queryset(self):
-        # Récupère et filtre les réservations futures
-        return Reservation.objects.filter(date_fin__gte=timezone.now()).order_by('date_debut')
-
+    
 # Vue 2 : Ajout d'une Entrée au Journal de Bord (Carré "Enregistrer un Vol")
 class LogEntryCreateView(CreateView):
     model = LogEntry

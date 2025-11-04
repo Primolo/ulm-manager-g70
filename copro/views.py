@@ -1,10 +1,12 @@
-from django.views.generic import ListView, CreateView, TemplateView # Ajout de TemplateView
-from django.urls import reverse_lazy
-from django.utils import timezone # Nécessaire pour la fonction get_queryset()
+# copro/views.py (Début du fichier)
 
-# --- Imports des modèles et formulaires (Utilisation de l'importation absolue pour stabiliser) ---
+from django.views.generic import ListView, CreateView 
+from django.urls import reverse_lazy 
+from django.utils import timezone 
+
+# On importe les modèles et formulaires de manière stable :
 from copro.models import Reservation, LogEntry 
-from copro.forms import LogEntryForm, ReservationForm 
+from copro.forms import LogEntryForm, ReservationForm
 # --------------------------------------------------------------------------------------------------
 
 # --- Vues du Dashboard ---

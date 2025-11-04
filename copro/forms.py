@@ -1,42 +1,33 @@
 from django import forms
-# Importation unique de User (car il n'est pas dans copro.models)
+# Importation simple de TOUS les modèles de l'application
+from .models import LogEntry, Reservation, CoproprietaireProfile 
 from django.contrib.auth.models import User 
-# NOTE: Nous importons nos modèles ci-dessous, mais pas ici.
-
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # Référence par CHAÎNE pour éviter la boucle d'importation
-        model = 'copro.LogEntry' 
+        # DOIT ÊTRE L'OBJET PYTHON RÉEL
+        model = LogEntry 
         fields = [
-            'pilote', 
-            'duree_vol', 
-            'heures_moteur_total', 
-            'aerodrome_depart', 
-            'aerodrome_arrivee', 
-            'notes'
+            'pilote', 'duree_vol', 'heures_moteur_total', 'aerodrome_depart', 
+            'aerodrome_arrivee', 'notes'
         ]
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
-    # Utilisation d'un import local pour le queryset (méthode la plus stable pour ce scénario)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from .models import CoproprietaireProfile # Import local stable
+        # Utilise le modèle importé.
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        # Référence par CHAÎNE pour éviter la boucle d'importation
-        model = 'copro.Reservation'
+        # DOIT ÊTRE L'OBJET PYTHON RÉEL
+        model = Reservation
         fields = [
-            'coproprietaire', 
-            'date_debut', 
-            'date_fin', 
-            'motif'
+            'coproprietaire', 'date_debut', 'date_fin', 'motif'
         ]
         widgets = {
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
@@ -44,8 +35,6 @@ class ReservationForm(forms.ModelForm):
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
-    # Utilisation d'un import local pour le queryset (méthode la plus stable pour ce scénario)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from .models import CoproprietaireProfile # Import local stable
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

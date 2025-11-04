@@ -1,16 +1,17 @@
-from django.views.generic import ListView, CreateView, View # Import des classes génériques
+from django.views.generic import ListView, CreateView, View
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
-from django.http import JsonResponse # Pour le flux JSON
-from datetime import datetime, date # Pour la gestion du temps
+from django.http import JsonResponse
+from datetime import datetime, date
 
-# --- Imports de l'Application (Le plus stable) ---
-# Importer les modèles d'abord
+# 1. IMPORTER LES MODÈLES AVANT LES FORMULAIRES
 from .models import Reservation, LogEntry 
-# Importer les formulaires ensuite
+# 2. IMPORTER LES FORMULAIRES EN DERNIER
 from .forms import ReservationForm, LogEntryForm 
-# --------------------------------------------------
+
+# ... (le reste du code des vues est correct et inchangé)
+# ...
 
 # --- Vues du Dashboard ---
 

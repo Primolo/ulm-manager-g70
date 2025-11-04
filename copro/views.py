@@ -4,8 +4,12 @@ from django.utils import timezone
 from django.shortcuts import render 
 
 # --- Imports de l'Application (Le plus stable) ---
-from .models import Reservation, LogEntry 
-from .forms import ReservationForm, LogEntryForm # Utiliser l'import relatif simple
+# copro/views.py (Début du fichier)
+
+# ...
+# Importation simple et relative (correcte pour ce contexte)
+from .forms import ReservationForm, LogEntryForm 
+# ...
 
 # --- Vues du Dashboard ---
 

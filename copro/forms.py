@@ -1,12 +1,14 @@
 from django import forms
-from copro.models import LogEntry, Reservation, CoproprietaireProfile
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User 
+# ATTENTION: On retire TOUS les imports de modèles LogEntry, Reservation, CoproprietaireProfile ici.
+
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        model = 'copro.LogEntry'
+        # Référence par chaîne (Application.Modèle)
+        model = 'copro.LogEntry' 
         fields = [
             'pilote', 
             'duree_vol', 
@@ -15,20 +17,22 @@ class LogEntryForm(forms.ModelForm):
             'aerodrome_arrivee', 
             'notes'
         ]
-        
         widgets = {
             'notes': forms.Textarea(attrs={'rows': 4}),
         }
 
+    # L'importation de CoproprietaireProfile se fait ici, de manière sûre
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from copro.models import CoproprietaireProfile
+        # Importation locale du modèle pour éviter la boucle d'importation
+        from copro.models import CoproprietaireProfile 
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
+        # Référence par chaîne (Application.Modèle)
         model = 'copro.Reservation'
         fields = [
             'coproprietaire', 
@@ -36,14 +40,14 @@ class ReservationForm(forms.ModelForm):
             'date_fin', 
             'motif'
         ]
-        
         widgets = {
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
             'date_fin': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
+    # L'importation de CoproprietaireProfile se fait ici, de manière sûre
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from copro.models import CoproprietaireProfile
+        from copro.models import CoproprietaireProfile 
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

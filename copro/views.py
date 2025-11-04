@@ -1,23 +1,51 @@
-from django.views.generic import ListView, CreateView
+from django.views.generic import ListView, CreateView, View # Ajout de View
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
-
-# --- NOUVEAUX IMPORTS POUR LE FLUX JSON ---
-from django.http import JsonResponse
-from django.views import View 
-from datetime import datetime, date
-# ------------------------------------------
+from django.http import JsonResponse # Pour le flux JSON
+from datetime import datetime, date # Pour la gestion du temps
 
 # Imports de l'Application (Vérifié et Stable)
 from .models import Reservation, LogEntry 
 from .forms import ReservationForm, LogEntryForm 
 
+
 # --- Vues du Dashboard ---
 
 # Vue 1 : Affiche la Liste des Réservations (Dashboard Page d'Accueil)
-# ... (Les classes ReservationListView, LogEntryCreateView, ReservationCreateView, LogbookListView sont ici) ...
+class ReservationListView(ListView):
+    model = Reservation
+    template_name = 'copro/reservation_list.html'
+    context_object_name = 'object_list'
 
+    def get_queryset(self):
+        # Récupère et filtre les réservations futures
+        return Reservation.objects.filter(date_fin__gte=timezone.now()).order_by('date_debut')
+
+# Vue 2 : Ajout d'une Entrée au Journal de Bord (Carré "Enregistrer un Vol")
+class LogEntryCreateView(CreateView):
+    model = LogEntry
+    form_class = LogEntryForm
+    template_name = 'copro/logentry_form.html'
+    success_url = reverse_lazy('reservation_list')
+
+# Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
+class ReservationCreateView(CreateView):
+    model = Reservation
+    form_class = ReservationForm
+    template_name = 'copro/reservation_form.html'
+    success_url = reverse_lazy('reservation_list')
+
+# Vue 4 : Affiche la liste de toutes les entrées du Journal de Bord
+class LogbookListView(ListView):
+    model = LogEntry
+    template_name = 'copro/logbook_list.html'
+    context_object_name = 'logbook_entries' 
+
+    def get_queryset(self):
+        # Trie par vols les plus récents (optimisation select_related)
+        return LogEntry.objects.all().select_related('pilote').order_by('-date_vol')
+        
 # Vue 5 : Fournit les données des réservations au format JSON pour FullCalendar
 class ReservationJsonFeed(View):
     def get(self, request, *args, **kwargs):
@@ -29,13 +57,10 @@ class ReservationJsonFeed(View):
             # FullCalendar utilise 'title', 'start', et 'end'
             events.append({
                 'title': f"Réservé par {reservation.coproprietaire.user.username}",
-                # Utilise isoformat() pour le format de date et heure universel requis par JS
                 'start': reservation.date_debut.isoformat(), 
                 'end': reservation.date_fin.isoformat(),
-                # URL de modification (pointe vers le formulaire d'ajout pour l'instant)
                 'url': reverse_lazy('reservation_add'), 
                 'allDay': False
             })
         
-        # 'safe=False' est nécessaire car la liste JSON n'est pas un dictionnaire de haut niveau
         return JsonResponse(events, safe=False)

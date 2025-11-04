@@ -1,15 +1,13 @@
 from django import forms
-# Importation simple de TOUS les modèles nécessaires
-from .models import LogEntry, Reservation, CoproprietaireProfile 
 from django.contrib.auth.models import User 
-
+# ATTENTION: Retirons TOUS les imports de .models pour briser la boucle d'importation.
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # DOIT ÊTRE L'OBJET PYTHON RÉEL
-        model = LogEntry 
+        # Référence par CHAÎNE pour éviter la boucle d'importation
+        model = 'copro.LogEntry' 
         fields = [
             'pilote', 
             'duree_vol', 
@@ -20,18 +18,19 @@ class LogEntryForm(forms.ModelForm):
         ]
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
-    # Méthode __init__ pour filtrer le queryset (Pilote)
+    # Utilisation d'un import local pour le queryset (méthode la plus stable pour ce scénario)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Utilise le modèle importé.
+        # Import local stable
+        from .models import CoproprietaireProfile 
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        # DOIT ÊTRE L'OBJET PYTHON RÉEL
-        model = Reservation
+        # Référence par CHAÎNE pour éviter la boucle d'importation
+        model = 'copro.Reservation'
         fields = [
             'coproprietaire', 
             'date_debut', 
@@ -39,14 +38,13 @@ class ReservationForm(forms.ModelForm):
             'motif'
         ]
         widgets = {
-            # Utilisation du widget HTML5 pour la saisie Date/Heure
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
             'date_fin': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
-    # Méthode __init__ pour filtrer le queryset (Copropriétaire)
+    # Utilisation d'un import local pour le queryset (méthode la plus stable pour ce scénario)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Utilise le modèle importé.
+        from .models import CoproprietaireProfile # Import local stable
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

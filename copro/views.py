@@ -3,13 +3,12 @@ from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
 
-# --- CORRECTION CRITIQUE : IMPORTER LES MODÈLES ---
-from .models import Reservation, LogEntry # <--- CETTE LIGNE EST ESSENTIELLE
-# --------------------------------------------------
-
-# Imports de tous les formulaires (qui sont corrects)
+# --- Importation essentielle (Un seul module à la fois) ---
+# Importe les modèles directement depuis le fichier
+from .models import Reservation, LogEntry 
+# Importe les formulaires depuis le fichier forms.py
 from .forms import ReservationForm, LogEntryForm 
-
+# --------------------------------------------------------
 
 # --- Vues du Dashboard ---
 

@@ -1,15 +1,17 @@
-from django.views.generic import ListView, CreateView, View
+from django.views.generic import ListView, CreateView, View 
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.shortcuts import render 
 from django.http import JsonResponse
 from datetime import datetime, date
 
-# IMPORTER LES MODÈLES AVANT LES FORMULAIRES EST CRUCIAL
+# --- Imports Harmonieux ---
+# Modèles
 from .models import Reservation, LogEntry 
+# Formulairres
 from .forms import ReservationForm, LogEntryForm 
 
-# ... (Le reste des vues que nous avons écrit est correct)
+# ... (Le reste des vues est correct)
 
 # --- Vues du Dashboard ---
 

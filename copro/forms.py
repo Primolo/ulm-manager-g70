@@ -1,28 +1,24 @@
 from django import forms
-# ATTENTION: Nous ne devons importer QUE les modèles LogEntry et Reservation ici.
-from .models import LogEntry, Reservation 
+from .models import LogEntry, Reservation, CoproprietaireProfile 
 from django.contrib.auth.models import User 
-
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        model = LogEntry # Objet réel
+        model = LogEntry 
         fields = ['pilote', 'duree_vol', 'heures_moteur_total', 'aerodrome_depart', 'aerodrome_arrivee', 'notes']
         widgets = { 'notes': forms.Textarea(attrs={'rows': 4}) }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Importation locale et sûre pour le queryset
-        from .models import CoproprietaireProfile 
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        model = Reservation # Objet réel
+        model = Reservation
         fields = ['coproprietaire', 'date_debut', 'date_fin', 'motif']
         widgets = {
             'date_debut': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
@@ -32,6 +28,4 @@ class ReservationForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Importation locale et sûre pour le queryset
-        from .models import CoproprietaireProfile 
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

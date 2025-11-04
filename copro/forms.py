@@ -1,14 +1,15 @@
 from django import forms
+# Utiliser l'importation relative normale
+from .models import LogEntry, Reservation, CoproprietaireProfile 
 from django.contrib.auth.models import User 
-# ATTENTION: On retire TOUS les imports de modèles LogEntry, Reservation, CoproprietaireProfile ici.
 
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # Référence par chaîne (Application.Modèle)
-        model = 'copro.LogEntry' 
+        # DOIT UTILISER L'OBJET PYTHON RÉEL, pas la chaîne
+        model = LogEntry 
         fields = [
             'pilote', 
             'duree_vol', 
@@ -21,19 +22,17 @@ class LogEntryForm(forms.ModelForm):
             'notes': forms.Textarea(attrs={'rows': 4}),
         }
 
-    # L'importation de CoproprietaireProfile se fait ici, de manière sûre
+    # Le filtre est correct ici, il a besoin de l'objet CoproprietaireProfile
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Importation locale du modèle pour éviter la boucle d'importation
-        from copro.models import CoproprietaireProfile 
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        # Référence par chaîne (Application.Modèle)
-        model = 'copro.Reservation'
+        # DOIT UTILISER L'OBJET PYTHON RÉEL
+        model = Reservation 
         fields = [
             'coproprietaire', 
             'date_debut', 
@@ -46,8 +45,7 @@ class ReservationForm(forms.ModelForm):
             'motif': forms.Textarea(attrs={'rows': 2}),
         }
 
-    # L'importation de CoproprietaireProfile se fait ici, de manière sûre
+    # Le filtre est correct ici
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from copro.models import CoproprietaireProfile 
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()

@@ -59,14 +59,19 @@ class LogbookListView(ListView):
 # Vue 5 : Fournit les données des réservations au format JSON pour FullCalendar
 class ReservationJsonFeed(View):
     def get(self, request, *args, **kwargs):
-        # Récupère toutes les réservations
-        reservations = Reservation.objects.all()
+        # --- CORRECTION CRITIQUE : Utiliser select_related ---
+        # Ceci force Django à récupérer le CoproprietaireProfile et l'objet User 
+        # en une seule requête SQL, évitant l'erreur 500 si la base est lente ou la liaison incomplète.
+        reservations = Reservation.objects.all().select_related('coproprietaire', 'coproprietaire__user')
+        # ----------------------------------------------------
         
         events = []
         for reservation in reservations:
-            # FullCalendar utilise 'title', 'start', et 'end'
+            # Assure-toi que la liaison utilisateur existe avant d'essayer d'y accéder
+            username = reservation.coproprietaire.user.username if reservation.coproprietaire and reservation.coproprietaire.user else "Inconnu"
+            
             events.append({
-                'title': f"Réservé par {reservation.coproprietaire.user.username}",
+                'title': f"Réservé par {username}",
                 'start': reservation.date_debut.isoformat(), 
                 'end': reservation.date_fin.isoformat(),
                 'url': reverse_lazy('reservation_add'), 

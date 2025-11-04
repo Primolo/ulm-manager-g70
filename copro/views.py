@@ -1,19 +1,18 @@
 from django.views.generic import ListView, CreateView
 from django.urls import reverse_lazy
 from django.utils import timezone
-from django.shortcuts import render # Nécessaire si tu as des vues basées sur des fonctions
+from django.shortcuts import render 
 
-# Imports de tous les modèles et formulaires de l'application 'copro'
-# Ceci est l'approche standard et stable pour lier les modules.
-from copro.models import Reservation, LogEntry 
-from copro.forms import LogEntryForm, ReservationForm 
-
+# --- Imports de l'Application (Le plus stable) ---
+from .models import Reservation, LogEntry 
+from .forms import ReservationForm, LogEntryForm # Utiliser l'import relatif simple
 
 # --- Vues du Dashboard ---
 
 # Vue 1 : Affiche la Liste des Réservations (Dashboard Page d'Accueil)
 class ReservationListView(ListView):
-    # model = Reservation # On le laisse hors de la classe pour plus de stabilité
+    # Ajouter le modèle explicitement, la stabilité est garantie par la correction dans forms.py
+    model = Reservation 
     template_name = 'copro/reservation_list.html'
     context_object_name = 'object_list'
 
@@ -27,7 +26,6 @@ class LogEntryCreateView(CreateView):
     form_class = LogEntryForm
     template_name = 'copro/logentry_form.html'
     success_url = reverse_lazy('reservation_list')
-    # NOTE: Le pilote sera automatiquement lié à l'utilisateur connecté via le formulaire.
 
 # Vue 3 : Ajout d'une Réservation (Carré "Gérer les Réservations")
 class ReservationCreateView(CreateView):
@@ -43,5 +41,5 @@ class LogbookListView(ListView):
     context_object_name = 'logbook_entries' 
 
     def get_queryset(self):
-        # Trie par vols les plus récents
+        # Trie par vols les plus récents (optimisation select_related)
         return LogEntry.objects.all().select_related('pilote').order_by('-date_vol')

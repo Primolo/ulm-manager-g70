@@ -1,14 +1,12 @@
 from django import forms
-# Importation directe et nécessaire des modèles
+# Utiliser une importation relative stricte et simple (le plus stable)
 from .models import LogEntry, Reservation, CoproprietaireProfile 
-from django.contrib.auth.models import User 
-
+from django.contrib.auth import get_user_model # Utiliser la fonction recommandée
 
 # --- Formulaire 1 : Journal de Bord (LogEntry) ---
 class LogEntryForm(forms.ModelForm):
     
     class Meta:
-        # UTILISE L'OBJET PYTHON RÉEL
         model = LogEntry 
         fields = [
             'pilote', 
@@ -22,14 +20,13 @@ class LogEntryForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Le queryset est ici, utilisant le modèle importé
+        # Assure que le queryset utilise le modèle importé
         self.fields['pilote'].queryset = CoproprietaireProfile.objects.all()
 
 # --- Formulaire 2 : Réservation ---
 class ReservationForm(forms.ModelForm):
     
     class Meta:
-        # UTILISE L'OBJET PYTHON RÉEL
         model = Reservation
         fields = [
             'coproprietaire', 
@@ -45,4 +42,5 @@ class ReservationForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Assure que le queryset utilise le modèle importé
         self.fields['coproprietaire'].queryset = CoproprietaireProfile.objects.all()
